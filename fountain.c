@@ -3,10 +3,10 @@
 #include <time.h>
 #include <string.h>
 
-#define BLK_SIZE 1
+#define BLK_SIZE 3
 #define BUFFER_SIZE 256
 
-// Structure definitions
+/* Structure definitions */
 typedef struct fountain {
 	char* string;
 	int num_blocks;
@@ -21,8 +21,9 @@ typedef struct packethold {
 	size_t offset;
 } packethold_t;
 
-// Function declarations
-fountain_t* make_fountain(const char* string);
+/* Function declarations */
+fountain_t* make_fountain(const char* string); /* allocates memory */
+void free_fountain(fountain_t* ftn);
 char * xorncpy (char* destination, const char* source, size_t num);
 char* decode_fountain(const char* string, int n /*number of blocks*/);
 
@@ -31,7 +32,7 @@ inline void memerror(int line) {
 	return;
 }
 
-// Program entry point
+/* Program entry point */
 int main(int argc, char** argv) {
 	srand(time(NULL));
 	char * input;
@@ -58,7 +59,7 @@ char * xorncpy (char* destination, const char* source, register size_t n) {
 fountain_t* make_fountain(const char* string) {
 	fountain_t* output = (fountain_t*) malloc(sizeof(fountain_t));
 	if (output == NULL) {
-		printf("Memory allocation error");
+        memerror(__LINE__);
 		return	NULL;
 	}
 	memset(output, 0 , sizeof(fountain_t));
@@ -68,6 +69,9 @@ fountain_t* make_fountain(const char* string) {
 
 	// Create distibution like 111112222333445
 	int* dist = (int*) malloc((n*(n+1)/2) * sizeof(int));
+    if (!dist)
+        goto free_dist;
+
 	int i, j, m, *lpdist;
     lpdist = dist;
 	for (m=n; m>0; m--) {
@@ -83,6 +87,8 @@ fountain_t* make_fountain(const char* string) {
 
 	output->num_blocks = d;
 	output->block = malloc(d*sizeof(int));
+    if (!output->block)
+        goto free_ob;
 	for(i = 0; i < d; i++) {
 		output->block[i] = rand() % n;
 		for (j = 0; j < i; j++) {
@@ -95,23 +101,37 @@ fountain_t* make_fountain(const char* string) {
 
 	// XOR blocks together
 	output->string = (char*) calloc((BLK_SIZE+1), sizeof(char));
+    if (!output->string)
+        goto free_os;
 	for(i = 0; i < d; i++) {
 		m = output->block[i] * BLK_SIZE;
 		xorncpy(output->string, string + m, BLK_SIZE*sizeof(char));
 	}
 
 	// Cleanup
-	if (dist) free(dist);
+	free(dist);
 
 	return output;
+
+free_os:
+free_ob:
+    free_fountain(output);
+free_dist:
+    free(dist);
+    return NULL;
 }
 
+void free_fountain(fountain_t* ftn) {
+    if (ftn->block) free(ftn->block);
+    if (ftn->string) free(ftn->string);
+    free(ftn);
+}
 
 char* decode_fountain(const char* string, int n /*number of blocks*/) {
 	char * output = (char*) calloc((strlen(string)+1) , sizeof(char));
 	if (output == NULL) {
 		memerror(__LINE__);
-		goto exit;
+        return NULL;
 	}
 	fountain_t * curr_fountain = NULL;
 	packethold_t hold;
@@ -132,6 +152,7 @@ char* decode_fountain(const char* string, int n /*number of blocks*/) {
 		memerror(__LINE__);
         goto exit;
 	}
+
 	int i, j, solved = 0, newfount = 1, f_num = 0;
 
 	while (!solved) {
@@ -150,7 +171,7 @@ char* decode_fountain(const char* string, int n /*number of blocks*/) {
                         BLK_SIZE*sizeof(char));
 				blkdecoded[curr_fountain->block[0]] = 1;
 			} else {
-                continue; //continue if receiving solved block
+                continue; // continue if receiving solved block
             }
 			
 			//Part two check against blocks in hold
@@ -165,9 +186,9 @@ char* decode_fountain(const char* string, int n /*number of blocks*/) {
                                 BLK_SIZE*sizeof(char));
 
 						// Remove removed blk number
-						for (j=i; j<hold.fountain[i].num_blocks-1; j++) {
+						for (j = i; j < hold.fountain[i].num_blocks-1; j++) {
 							hold.fountain[i].block[j] =
-                                hold.fountain[i].block[j+1];
+                                hold.fountain[i].block[j + 1];
 						}
 						j = hold.fountain[i].num_blocks - 1;
 						hold.fountain[i].block[j] = 0;
@@ -261,7 +282,7 @@ char* decode_fountain(const char* string, int n /*number of blocks*/) {
 
 exit:
     if (blkdecoded) free(blkdecoded);
-    if (hold.fountain) free(hold.fountain);
+    if (hold.fountain) free_fountain(hold.fountain);
 
     return NULL;
 }
