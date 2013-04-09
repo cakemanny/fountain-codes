@@ -2,60 +2,17 @@
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
+#include "fountain.h"
 
 #define BLK_SIZE 2
 #define BUFFER_SIZE 256
 
-/* Structure definitions */
-typedef struct fountain {
-	char* string;
-	int num_blocks;
-	// they start from block 0
-	int* block;
-} fountain_t;
-
-typedef struct packethold {
-	int iPackets;
-	int iSlots;
-	fountain_t * fountain;
-	size_t offset;
-} packethold_t;
-
-/* Function declarations */
-fountain_t* make_fountain(const char* string); /* allocates memory */
-void free_fountain(fountain_t* ftn);
-int cmp_fountain(fountain_t* ftn1, fountain_t* ftn2);
-char * xorncpy (char* destination, const char* source, size_t num);
-char* decode_fountain(const char* string, int n /*number of blocks*/);
-
-inline void memerror(int line) {
+static inline void memerror(int line) {
 	printf("Memory allocation error, Line: %d", line);
 	return;
 }
 
-/* Program entry point */
-int main(int argc, char** argv) {
-	srand(time(NULL));
-	char * input;
-	if (argc != 2)
-		input = "Hello there you jammy little bugger!";
-	else
-		input = argv[1];
-
-    /*
-    int i=0;
-    for (;i < 10; ++i) {
-        fountain_t* ftn = make_fountain(input)
-    }
-    */
-
-	char * decoded = decode_fountain(input, strlen(input) / BLK_SIZE);
-	printf("The decoded version of: %s\nIs: %s",input,decoded);
-	
-	return 0;
-}
-
-char * xorncpy (char* destination, const char* source, register size_t n) {
+static char * xorncpy (char* destination, const char* source, register size_t n) {
 	register char* d = destination;
 	register const char* s = source;
 	do {
@@ -65,6 +22,12 @@ char * xorncpy (char* destination, const char* source, register size_t n) {
 	return (destination);
 }
 
+int size_in_blocks(const char* string) {
+    int string_len = strlen(string);
+    return (string_len % BLK_SIZE)
+        ? (string_len / BLK_SIZE) + 1 : string_len / BLK_SIZE;
+}
+
 fountain_t* make_fountain(const char* string) {
 	fountain_t* output = (fountain_t*) malloc(sizeof(fountain_t));
 	if (output == NULL) {
@@ -72,9 +35,7 @@ fountain_t* make_fountain(const char* string) {
 		return	NULL;
 	}
 	memset(output, 0 , sizeof(fountain_t));
-	int string_len = strlen(string);
-	int n = (string_len % BLK_SIZE)
-        ? (string_len / BLK_SIZE) + 1 : string_len / BLK_SIZE;
+	int n = size_in_blocks(string);
 
 	// Create distibution like 111112222333445
 	int* dist = (int*) malloc((n*(n+1)/2) * sizeof(int));
