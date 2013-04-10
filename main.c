@@ -5,12 +5,12 @@
 
 /* Program entry point */
 int main(int argc, char** argv) {
-	srand(time(NULL));
-	char * input;
-	if (argc != 2)
-		input = "Hello there you jammy little bugger!";
-	else
-		input = argv[1];
+    srand(time(NULL));
+    char * input;
+    if (argc != 2)
+        input = "Hello there you jammy little bugger!";
+    else
+        input = argv[1];
 
     /*
     int i=0;
@@ -19,9 +19,9 @@ int main(int argc, char** argv) {
     }
     */
 
-	char * decoded = decode_fountain(input, size_in_blocks(input));
-	printf("The decoded version of: %s\nIs: %s",input,decoded);
+    char * decoded = decode_fountain(input, size_in_blocks(input));
+    printf("The decoded version of: %s\nIs: %s\n",input,decoded);
 
-	return 0;
+    return 0;
 }
 

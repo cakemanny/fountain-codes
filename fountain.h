@@ -3,17 +3,17 @@
 
 /* Structure definitions */
 typedef struct fountain {
-	char* string;
-	int num_blocks;
-	// they start from block 0
-	int* block;
+    char* string;
+    int num_blocks;
+    // they start from block 0
+    int* block;
 } fountain_t;
 
 typedef struct packethold {
-	int iPackets;
-	int iSlots;
-	fountain_t * fountain;
-	size_t offset;
+    int iPackets;
+    int iSlots;
+    fountain_t * fountain;
+    size_t offset;
 } packethold_t;
 
 /* Function declarations */
@@ -24,4 +24,3 @@ int cmp_fountain(fountain_t* ftn1, fountain_t* ftn2);
 char* decode_fountain(const char* string, int n /*number of blocks*/);
 
 #endif /* __FOUNTAIN_H__ */
-
