@@ -32,7 +32,7 @@ fountain_t* make_fountain(const char* string) {
     fountain_t* output = malloc(sizeof *output);
     if (output == NULL) {
         memerror(__LINE__);
-        return  NULL;
+        return NULL;
     }
     memset(output, 0 , sizeof(fountain_t));
     int n = size_in_blocks(string);
@@ -103,7 +103,7 @@ int cmp_fountain(fountain_t* ftn1, fountain_t* ftn2) {
         return ret;
     if (ret = strcmp(ftn1->string, ftn2->string))
         return ret;
-    
+
     int i=0;
     for (; i < ftn1->num_blocks; ++i) {
         if (ret = (ftn1->block[i] - ftn2->block[i]))
@@ -148,7 +148,7 @@ char* decode_fountain(const char* string, int n /*number of blocks*/) {
             f_num++;
         }
         newfount = 1;
-        
+
         // Case one, block size one
         if (curr_fountain->num_blocks == 1) {
             if (blkdecoded[curr_fountain->block[0]] == 0) {
@@ -158,7 +158,7 @@ char* decode_fountain(const char* string, int n /*number of blocks*/) {
             } else {
                 continue; // continue if receiving solved block
             }
-            
+
             //Part two check against blocks in hold
             int match = 0;
             for (i = 0; i < hold.iPackets; i++) {
@@ -251,7 +251,7 @@ char* decode_fountain(const char* string, int n /*number of blocks*/) {
                         goto exit;
                     }
                     hold.iSlots = multi * BUFFER_SIZE;
-                    
+
                 }
                 hold.fountain[hold.offset++] = *curr_fountain;
                 hold.iPackets++;
