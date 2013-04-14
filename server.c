@@ -27,9 +27,10 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    while ((hello = recvd_hello()) >=0) {
+    while ((hello = recvd_hello()) >= 0) {
         if (hello) {
-            /* do some file transfering
+            printf("Received connection...\n");
+            /* == do some file transfering ==
              * send file signature
              * while !recv'd finished: send block
             */
@@ -69,8 +70,8 @@ int recvd_hello() {
     int remote_addr_size = sizeof remote_addr;
 
     memset(buf, '\0', BUF_LEN);
-    if (recvfrom(s, buf, BUF_LEN,(struct sockaddr*)&remote_addr,
-                remote_addr_size) < 0)
+    if (recvfrom(s, buf, BUF_LEN, 0, (struct sockaddr*)&remote_addr,
+                &remote_addr_size) < 0)
         return -1;
     if (strcmp(buf, "FCWAITING\r\n") == 0) {
         return 1;
