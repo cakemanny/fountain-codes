@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    while ((hello = recvd_hello()) >=0) {
+    while ((hello = recvd_hello()) >= 0) {
         if (hello) {
             /* do some file transfering
              * send file signature
