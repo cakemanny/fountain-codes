@@ -17,10 +17,9 @@ typedef struct packethold {
 } packethold_t;
 
 /* Function declarations */
-int size_in_blocks(const char* string); /* we should be getting rid of this */
-fountain_t* make_fountain(const char* string); /* allocates memory */
+fountain_t* make_fountain(const char* string, int blk_size); /* allocates memory */
 void free_fountain(fountain_t* ftn);
 int cmp_fountain(fountain_t* ftn1, fountain_t* ftn2);
-char* decode_fountain(const char* string, int n /*number of blocks*/);
+char* decode_fountain(const char* string, int blk_size);
 
 #endif /* __FOUNTAIN_H__ */

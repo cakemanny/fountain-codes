@@ -12,14 +12,15 @@ int main(int argc, char** argv) {
     else
         input = argv[1];
 
+    int blk_size = 20;
     /*
     int i=0;
     for (;i < 10; ++i) {
-        fountain_t* ftn = make_fountain(input)
+        fountain_t* ftn = make_fountain(input, blk_size)
     }
     */
 
-    char * decoded = decode_fountain(input, size_in_blocks(input));
+    char * decoded = decode_fountain(input, blk_size);
     printf("The decoded version of: %s\nIs: %s\n",input,decoded);
 
     return 0;

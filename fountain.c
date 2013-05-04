@@ -18,24 +18,24 @@ static char * xorncpy (char* destination, const char* source, register size_t n)
     do {
         if (*s) *d++ ^= *s++;
         else break;
-    } while (--n !=0);
+    } while (--n != 0);
     return (destination);
 }
 
-int size_in_blocks(const char* string) {
+static int size_in_blocks(const char* string, int blk_size) {
     int string_len = strlen(string);
-    return (string_len % BLK_SIZE)
-        ? (string_len / BLK_SIZE) + 1 : string_len / BLK_SIZE;
+    return (string_len % blk_size)
+        ? (string_len / blk_size) + 1 : string_len / blk_size;
 }
 
-fountain_t* make_fountain(const char* string) {
+fountain_t* make_fountain(const char* string, int blk_size) {
     fountain_t* output = malloc(sizeof *output);
     if (output == NULL) {
         memerror(__LINE__);
         return NULL;
     }
     memset(output, 0 , sizeof(fountain_t));
-    int n = size_in_blocks(string);
+    int n = size_in_blocks(string, blk_size);
 
     // Create distibution like 111112222333445
     int* dist = malloc((n*(n+1)/2) * sizeof(*dist));
@@ -44,7 +44,7 @@ fountain_t* make_fountain(const char* string) {
 
     int i, j, m, *lpdist;
     lpdist = dist;
-    for (m=n; m>0; m--) {
+    for (m=n; m > 0; m--) {
         for (i=0; i<m; i++) {
             *lpdist = n - m + 1;
             lpdist++;
@@ -59,7 +59,7 @@ fountain_t* make_fountain(const char* string) {
     output->block = malloc(d * sizeof *(output->block));
     if (!output->block)
         goto free_ob;
-    for(i = 0; i < d; i++) {
+    for (i = 0; i < d; i++) {
         output->block[i] = rand() % n;
         for (j = 0; j < i; j++) {
             if (output->block[i] == output->block[j]) {
@@ -70,12 +70,12 @@ fountain_t* make_fountain(const char* string) {
     }
 
     // XOR blocks together
-    output->string = calloc(BLK_SIZE+1, sizeof *(output->string));
+    output->string = calloc(blk_size+1, sizeof *(output->string));
     if (!output->string)
         goto free_os;
-    for(i = 0; i < d; i++) {
-        m = output->block[i] * BLK_SIZE;
-        xorncpy(output->string, string + m, BLK_SIZE);
+    for (i = 0; i < d; i++) {
+        m = output->block[i] * blk_size;
+        xorncpy(output->string, string + m, blk_size);
     }
 
     // Cleanup
@@ -113,7 +113,8 @@ int cmp_fountain(fountain_t* ftn1, fountain_t* ftn2) {
     return 0;
 }
 
-char* decode_fountain(const char* string, int n /*number of blocks*/) {
+char* decode_fountain(const char* string, int blk_size) {
+    int n = size_in_blocks(string, blk_size);
     char * output = calloc(strlen(string) + 1 , sizeof *output);
     if (output == NULL) {
         memerror(__LINE__);
@@ -144,7 +145,7 @@ char* decode_fountain(const char* string, int n /*number of blocks*/) {
     while (!solved) {
         // recv fountain packet
         if (newfount) {
-            curr_fountain = make_fountain(string);
+            curr_fountain = make_fountain(string, blk_size);
             f_num++;
         }
         newfount = 1;
@@ -152,8 +153,8 @@ char* decode_fountain(const char* string, int n /*number of blocks*/) {
         // Case one, block size one
         if (curr_fountain->num_blocks == 1) {
             if (blkdecoded[curr_fountain->block[0]] == 0) {
-                strncpy(output + (curr_fountain->block[0] * BLK_SIZE),
-                        curr_fountain->string, BLK_SIZE);
+                strncpy(output + (curr_fountain->block[0] * blk_size),
+                        curr_fountain->string, blk_size);
                 blkdecoded[curr_fountain->block[0]] = 1;
             } else {
                 continue; // continue if receiving solved block
@@ -168,7 +169,7 @@ char* decode_fountain(const char* string, int n /*number of blocks*/) {
                         // Xor out the hold block
                         xorncpy(hold.fountain[i].string,
                                 curr_fountain->string,
-                                BLK_SIZE);
+                                blk_size);
 
                         // Remove removed blk number
                         for (j = i; j < hold.fountain[i].num_blocks-1; j++) {
@@ -188,9 +189,9 @@ char* decode_fountain(const char* string, int n /*number of blocks*/) {
                 if (hold.fountain[i].num_blocks == 1) {
                     //move into output
                     if (blkdecoded[hold.fountain[i].block[0]] == 0) {
-                        strncpy(output + (hold.fountain[i].block[0]*BLK_SIZE),
+                        strncpy(output + (hold.fountain[i].block[0]*blk_size),
                                 hold.fountain[i].string,
-                                BLK_SIZE);
+                                blk_size);
 
                         blkdecoded[hold.fountain[i].block[0]] = 1;
                     }
@@ -210,8 +211,8 @@ char* decode_fountain(const char* string, int n /*number of blocks*/) {
                 if (blkdecoded[curr_fountain->block[i]]) {
                     //Xor the decoded block out of new packet
                     xorncpy(curr_fountain->string,
-                            output + (curr_fountain->block[i]*BLK_SIZE),
-                            BLK_SIZE);
+                            output + (curr_fountain->block[i]*blk_size),
+                            blk_size);
 
                     // Remove decoded block number
                     for (j = i; j < curr_fountain->num_blocks - 1; j++) {
@@ -262,7 +263,7 @@ char* decode_fountain(const char* string, int n /*number of blocks*/) {
 
         // update solved
         solved = 1;
-        for(i = 0; i < n; i++) {
+        for (i = 0; i < n; i++) {
             if(!blkdecoded[i]) {
                 solved = 0;
                 break;
