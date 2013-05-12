@@ -15,7 +15,7 @@ it in Win32 (to work with mingw32), then linux; but maybe someone else will
 work on that in the mean time.
 
 - [x] Split the fountain management into it's own source file
-- [ ] Change the functions to accept a block size (rather than having it
+- [x] Change the functions to accept a block size (rather than having it
   `#define`d.
 - [ ] Split the decode function into some more manageable little functions
 
