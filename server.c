@@ -1,16 +1,24 @@
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
+#define _GNU_SOURCE // asks stdio.h to inlude asprintf
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "fountain.h"
 
 #define LISTEN_PORT 2534
+#define LISTEN_IP "127.0.0.1"
+#define ENDL "\r\n"
 #define BUF_LEN 512
+#define BURST_SIZE 1000
 
 /* Forward declarations */
 static int create_connection(const char* ip_address);
 static int recvd_hello();
 static void close_connection();
+static int send_filename(const char * filename);
+static void handle_error(int error_number);
+static void send_block_burst(const char * filename);
 
 static SOCKET s;
 static WSADATA w;
@@ -22,10 +30,12 @@ void print_usage_and_exit() {
 
 int main(int argc, char** argv) {
     int error, hello;
-    if ((error = create_connection("127.0.0.1")) < 0) {
+
+    if ((error = create_connection(LISTEN_IP)) < 0) {
         close_connection();
         return -1;
     }
+    printf("Listening on " LISTEN_IP ":%d ..." ENDL, LISTEN_PORT);
 
     while ((hello = recvd_hello()) >= 0) {
         if (hello) {
@@ -34,6 +44,10 @@ int main(int argc, char** argv) {
              * send file signature
              * while !recv'd finished: send block
             */
+            if ((error = send_filename()) < 0)
+                handle_error(error);
+            send_block_burst();
+            }
         }
     }
 
@@ -86,4 +100,23 @@ void close_connection() {
     WSACleanup();
 }
 
+int send_filename(const char * filename) {
+    // do some dort of sendto(s buf buf_len ...
+}
+
+void handle_error(int error_number) {
+    switch (error_number) {
+        case -1:
+            printf("Error: " ENDL);
+            break;
+    }
+}
+
+void send_block_burst(const char * filename) {
+    for (int i = 0; i < BURST_SIZE; i++) {
+        // read a bit of file
+        // make a fountain
+        // send it across the air
+    }
+}
 
