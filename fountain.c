@@ -4,7 +4,6 @@
 #include <string.h>
 #include "fountain.h"
 
-#define BLK_SIZE 4
 #define BUFFER_SIZE 256
 
 static inline void memerror(int line) {
@@ -28,13 +27,91 @@ static int size_in_blocks(const char* string, int blk_size) {
         ? (string_len / blk_size) + 1 : string_len / blk_size;
 }
 
-fountain_t* make_fountain(const char* string, int blk_size) {
-    fountain_t* output = malloc(sizeof *output);
+/* makes a fountain fountain, given a file */
+fountain_s* fmake_fountain(FILE* f, int blk_size) {
+    fountain_s* output = malloc(sizeof *output);
+    if (!output) {
+        memerror(__LINE__);
+        return NULL;
+    }
+    memset(output, 0, sizeof *output);
+    // get filesize
+    fseek(f, 0, SEEK_END);
+    int filesize = ftell(f);
+    int n = (filesize % blk_size)
+        ? (filesize /blk_size) + 1 : filesize / blk_size;
+
+    // Create distibution like 111112222333445
+    int* dist = malloc((n*(n+1)/2) * sizeof(*dist));
+    if (!dist)
+        goto free_dist;
+
+    int i, j, m, *lpdist;
+    lpdist = dist;
+    for (m=n; m > 0; m--) {
+        for (i=0; i<m; i++) {
+            *lpdist = n - m + 1;
+            lpdist++;
+        }
+    }
+
+    // Pick d
+    int d = rand() % (n*(n+1)/2);
+    d = dist[d];
+
+    output->num_blocks = d;
+    output->block = malloc(d * sizeof *(output->block));
+    if (!output->block)
+        goto free_ob;
+    for (i = 0; i < d; i++) {
+        output->block[i] = rand() % n;
+        for (j = 0; j < i; j++) {
+            if (output->block[i] == output->block[j]) {
+                i--;
+                break;
+            }
+        }
+    }
+
+    // XOR blocks together
+    output->string = calloc(blk_size + 1, sizeof *(output->string));
+    if (!output->string)
+        goto free_os;
+
+    char * buffer = malloc(blk_size);
+    if (!buffer)
+        goto free_buffer;
+
+    for (i = 0; i < d; i++) {
+        m = output->block[i] * blk_size;
+        fseek(f, m, SEEK_SET); /* m bytes from beginning of file */
+        fread(buffer, 1, blk_size, f);
+        xorncpy(output->string, buffer, blk_size);
+    }
+
+    // Cleanup
+    free(buffer);
+    free(dist);
+
+    return output;
+
+    //free(buffer) // dead
+free_buffer:
+free_os:
+free_ob:
+    free(dist);
+free_dist:
+    free_fountain(output);
+    return NULL;
+}
+
+fountain_s* make_fountain(const char* string, int blk_size) {
+    fountain_s* output = malloc(sizeof *output);
     if (output == NULL) {
         memerror(__LINE__);
         return NULL;
     }
-    memset(output, 0 , sizeof(fountain_t));
+    memset(output, 0, sizeof *output);
     int n = size_in_blocks(string, blk_size);
 
     // Create distibution like 111112222333445
@@ -85,28 +162,28 @@ fountain_t* make_fountain(const char* string, int blk_size) {
 
 free_os:
 free_ob:
-    free_fountain(output);
-free_dist:
     free(dist);
+free_dist: // failed to create dist so we don't need to free it
+    free_fountain(output);
     return NULL;
 }
 
-void free_fountain(fountain_t* ftn) {
+void free_fountain(fountain_s* ftn) {
     if (ftn->block) free(ftn->block);
     if (ftn->string) free(ftn->string);
     free(ftn);
 }
 
-int cmp_fountain(fountain_t* ftn1, fountain_t* ftn2) {
+int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2) {
     int ret;
-    if (ret = (ftn1->num_blocks - ftn2->num_blocks))
+    if (( ret = (ftn1->num_blocks - ftn2->num_blocks) ))
         return ret;
-    if (ret = strcmp(ftn1->string, ftn2->string))
+    if (( ret = strcmp(ftn1->string, ftn2->string) ))
         return ret;
 
     int i=0;
     for (; i < ftn1->num_blocks; ++i) {
-        if (ret = (ftn1->block[i] - ftn2->block[i]))
+        if (( ret = (ftn1->block[i] - ftn2->block[i]) ))
             return ret;
     }
 
@@ -120,17 +197,17 @@ char* decode_fountain(const char* string, int blk_size) {
         memerror(__LINE__);
         return NULL;
     }
-    fountain_t * curr_fountain = NULL;
-    packethold_t hold;
+    fountain_s * curr_fountain = NULL;
+    packethold_s hold;
 
     // Create the hold for storing packets for later
     hold.fountain = malloc(BUFFER_SIZE * sizeof *(hold.fountain));
     if (hold.fountain == NULL) {
         memerror(__LINE__);
-        goto exit;
+        goto hold_exit;
     }
-    hold.iSlots = BUFFER_SIZE;
-    hold.iPackets = 0;
+    hold.num_slots = BUFFER_SIZE;
+    hold.num_packets = 0;
     hold.offset = 0;
 
 
@@ -162,7 +239,7 @@ char* decode_fountain(const char* string, int blk_size) {
 
             //Part two check against blocks in hold
             int match = 0;
-            for (i = 0; i < hold.iPackets; i++) {
+            for (i = 0; i < hold.num_packets; i++) {
                 for (j = 0; j < hold.fountain[i].num_blocks; j++ ) {
                     if (hold.fountain[i].block[j]
                             == curr_fountain->block[0]) {
@@ -196,13 +273,13 @@ char* decode_fountain(const char* string, int blk_size) {
                         blkdecoded[hold.fountain[i].block[0]] = 1;
                     }
                     //remove from hold
-                    for (j = i; j < hold.iPackets - 1; j++) {
+                    for (j = i; j < hold.num_packets - 1; j++) {
                         hold.fountain[j] = hold.fountain[j+1];
                     }
                     memset(hold.fountain + hold.offset - 1, 0,
                             sizeof *(hold.fountain));
                     hold.offset--;
-                    hold.iPackets--;
+                    hold.num_packets--;
                 }
             }
         } else {
@@ -233,7 +310,7 @@ char* decode_fountain(const char* string, int blk_size) {
 
             // check if packet is already in hold
             int inhold = 0;
-            for (i = 0; i < hold.iSlots; i++) {
+            for (i = 0; i < hold.num_slots; i++) {
                 if (!cmp_fountain(curr_fountain, hold.fountain + i)) {
                     inhold = 1;
                     break;
@@ -241,8 +318,8 @@ char* decode_fountain(const char* string, int blk_size) {
             }
             if (!inhold) {
                 // Add packet to hold
-                if (hold.offset >= hold.iSlots) {
-                    int multi = (hold.iSlots / BUFFER_SIZE) + 1;
+                if (hold.offset >= hold.num_slots) {
+                    int multi = (hold.num_slots / BUFFER_SIZE) + 1;
 
                     hold.fountain = realloc(hold.fountain,
                             multi * BUFFER_SIZE * sizeof *(hold.fountain));
@@ -251,11 +328,11 @@ char* decode_fountain(const char* string, int blk_size) {
                         memerror(__LINE__);
                         goto exit;
                     }
-                    hold.iSlots = multi * BUFFER_SIZE;
+                    hold.num_slots = multi * BUFFER_SIZE;
 
                 }
                 hold.fountain[hold.offset++] = *curr_fountain;
-                hold.iPackets++;
+                hold.num_packets++;
             }
 
             free(curr_fountain); /* we can free it now that it's been copied */
@@ -278,6 +355,7 @@ char* decode_fountain(const char* string, int blk_size) {
 
 exit:
     if (blkdecoded) free(blkdecoded);
+hold_exit:
     if (hold.fountain) free_fountain(hold.fountain);
 
     return NULL;

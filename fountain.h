@@ -1,25 +1,28 @@
 #ifndef __FOUNTAIN_H__
 #define __FOUNTAIN_H__
 
+#include <stdio.h> // FILE
+
 /* Structure definitions */
-typedef struct fountain {
+typedef struct fountain_s {
     char* string;
     int num_blocks;
     // they start from block 0
     int* block;
-} fountain_t;
+} fountain_s;
 
-typedef struct packethold {
-    int iPackets;
-    int iSlots;
-    fountain_t * fountain;
+typedef struct packethold_s {
+    int num_packets;
+    int num_slots;
+    fountain_s * fountain;
     size_t offset;
-} packethold_t;
+} packethold_s;
 
 /* Function declarations */
-fountain_t* make_fountain(const char* string, int blk_size); /* allocates memory */
-void free_fountain(fountain_t* ftn);
-int cmp_fountain(fountain_t* ftn1, fountain_t* ftn2);
+fountain_s* make_fountain(const char* string, int blk_size); /* allocates memory */
+fountain_s* fmake_fountain(FILE* f, int blk_size); /* allocates memory */
+void free_fountain(fountain_s* ftn);
+int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2);
 char* decode_fountain(const char* string, int blk_size);
 
 #endif /* __FOUNTAIN_H__ */
