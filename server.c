@@ -1,10 +1,11 @@
-#define _GNU_SOURCE // asks stdio.h to inlude asprintf
+#define _GNU_SOURCE // asks stdio.h to include asprintf
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "asprintf.h"
+#include "errors.h"
 #include "fountain.h"
 
 #define LISTEN_PORT 2534
@@ -23,9 +24,8 @@ static int create_connection(const char* ip_address);
 static int recvd_hello(client_s * new_client);
 static void close_connection();
 static int send_filename(client_s client, const char * filename);
-static void handle_error(int error_number);
 int send_std_msg(client_s client, char const * msg);
-static void send_block_burst(const char * filename);
+static int send_block_burst(const char * filename);
 
 static SOCKET s;
 static WSADATA w;
@@ -43,12 +43,7 @@ int main(int argc, char** argv) {
 
     // Check that the file exists
     FILE* f = fopen(filename, "r");
-    if (f == NULL) {
-        fprintf(stderr,
-                "Error opening file %s, cannot serve this file" ENDL,
-                filename);
-        exit(1);
-    }
+    if (f == NULL) handle_error(ERR_FOPEN, &filename);
     fclose(f);
 
     int error;
@@ -68,9 +63,10 @@ int main(int argc, char** argv) {
              * send file signature
              * while !recv'd finished: send block
             */
-            if ((error = send_filename(client, argv[1])) < 0)
-                handle_error(error);
-            send_block_burst(filename);
+            if ((error = send_filename(client, filename)) < 0)
+                handle_error(error, NULL);
+            if ((error = send_block_burst(filename)) < 0)
+                handle_error(error, &filename);
         }
     }
 
@@ -134,25 +130,22 @@ int send_std_msg(client_s client, char const * msg) {
 int send_filename(client_s client, const char * filename) {
     char * msg;
     if (asprintf(&msg, "FILENAME %s" ENDL, filename) < 0)
-        return -1;
+        return ERR_MEM;
     send_std_msg(client, msg);
     free(msg); 
     return 0;
 }
 
-void handle_error(int error_number) {
-    switch (error_number) {
-        case -1:
-            printf("Error: " ENDL);
-            break;
-    }
-}
-
-void send_block_burst(const char * filename) {
+int send_block_burst(const char * filename) {
+    FILE* f = fopen(filename, "r");
+    if (!f) return ERR_FOPEN;
     for (int i = 0; i < BURST_SIZE; i++) {
-        // read a bit of file
+        
         // make a fountain
         // send it across the air
     }
+
+    fclose(f);
+    return 0;
 }
 

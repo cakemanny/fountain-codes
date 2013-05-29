@@ -11,7 +11,7 @@ all: $(TARGETS)
 fountain.exe: $(FOUNT_OBJ)
 	$(LD) $(LFLAGS) -o $@ $^ $(LLIBS)
 
-server.exe: server.o
+server.exe: server.o errors.o
 	$(LD) $(LFLAGS) -o $@ $^ $(LLIBS)
 
 %.o: %.c
