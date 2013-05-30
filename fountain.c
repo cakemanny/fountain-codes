@@ -29,7 +29,8 @@ static int size_in_blocks(const char* string, int blk_size) {
 
 static int choose_num_blocks(const int n) {
     int* dist = malloc((1 + n*(n+1)/2) * sizeof *dist);
-    if (!dist) return 1;
+    if (!dist) return 1; /* We ran out of memory, should probs die, but
+                          * maybe we can squeeze out one more block */
 
     int* lpdist = dist;
     for (int m = n; m > 0; m--) {
@@ -45,17 +46,32 @@ static int choose_num_blocks(const int n) {
     return d;
 }
 
-static int* select_blocks(const int  n) {
+static int select_blocks(const int n, fountain_s* ftn) {
     int d = choose_num_blocks(n);
 
-    int* blocks = malloc(d * sizeof *blocks); 
+    int* blocks = malloc(d * sizeof *blocks);
+    if (!blocks) return -1;
+
+    for (int i = 0; i < d; i++) {
+        blocks[i] = rand() % n;
+        for (int j = 0; j < i; j++) {
+            if (blocks[i] == blocks[j]) {
+                i--;
+                break;
+            }
+        }
+    }
+
+    ftn->num_blocks = d;
+    ftn->block = blocks;
+    return 0;
 }
 
 /* makes a fountain fountain, given a file */
 fountain_s* fmake_fountain(FILE* f, int blk_size) {
     fountain_s* output = malloc(sizeof *output);
-    if (!output)
-        return NULL;
+    if (!output) return NULL;
+
     memset(output, 0, sizeof *output);
     // get filesize
     fseek(f, 0, SEEK_END);
@@ -63,31 +79,14 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
     int n = (filesize % blk_size)
         ? (filesize /blk_size) + 1 : filesize / blk_size;
 
-    // Pick d
-    int d = choose_num_blocks(n);
-
-    output->num_blocks = d;
-    output->block = malloc(d * sizeof *(output->block));
-    if (!output->block)
-        goto free_ob;
-    for (int i = 0; i < d; i++) {
-        output->block[i] = rand() % n;
-        for (int j = 0; j < i; j++) {
-            if (output->block[i] == output->block[j]) {
-                i--;
-                break;
-            }
-        }
-    }
+    if (select_blocks(n, output) < 0) goto free_ob;
 
     // XOR blocks together
     output->string = calloc(blk_size + 1, sizeof *(output->string));
-    if (!output->string)
-        goto free_os;
+    if (!output->string) goto free_os;
 
     char * buffer = malloc(blk_size);
-    if (!buffer)
-        goto free_buffer;
+    if (!buffer) goto free_buffer;
 
     for (int i = 0; i < output->num_blocks; i++) {
         int m = output->block[i] * blk_size;
@@ -111,34 +110,17 @@ free_ob:
 
 fountain_s* make_fountain(const char* string, int blk_size) {
     fountain_s* output = malloc(sizeof *output);
-    if (output == NULL) {
-        memerror(__LINE__);
-        return NULL;
-    }
+    if (output == NULL) return NULL;
+
     memset(output, 0, sizeof *output);
     int n = size_in_blocks(string, blk_size);
 
-    // Pick d
-    int d = choose_num_blocks(n);
-
-    output->num_blocks = d;
-    output->block = malloc(d * sizeof *(output->block));
-    if (!output->block)
-        goto free_ob;
-    for (int i = 0; i < d; i++) {
-        output->block[i] = rand() % n;
-        for (int j = 0; j < i; j++) {
-            if (output->block[i] == output->block[j]) {
-                i--;
-                break;
-            }
-        }
-    }
+    if (select_blocks(n, output) < 0) goto free_ob;
 
     // XOR blocks together
     output->string = calloc(blk_size+1, sizeof *(output->string));
-    if (!output->string)
-        goto free_os;
+    if (!output->string) goto free_os;
+
     for (int i = 0; i < output->num_blocks; i++) {
         int m = output->block[i] * blk_size;
         xorncpy(output->string, string + m, blk_size);
@@ -165,14 +147,15 @@ int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2) {
     if (( ret = strcmp(ftn1->string, ftn2->string) ))
         return ret;
 
-    int i=0;
-    for (; i < ftn1->num_blocks; ++i) {
+    for (int i=0; i < ftn1->num_blocks; ++i) {
         if (( ret = (ftn1->block[i] - ftn2->block[i]) ))
             return ret;
     }
 
     return 0;
 }
+
+//TODO: Create a stateless decode_fountain and store state in some structures
 
 char* decode_fountain(const char* string, int blk_size) {
     int n = size_in_blocks(string, blk_size);
