@@ -5,6 +5,13 @@
 
 /* Program entry point */
 int main(int argc, char** argv) {
+/*
+    int* dist = create_ddist(10);
+    for (int* it = dist; *it >= 0; ++it)
+        printf("%d", *it);
+    printf("\n");
+    free(dist);
+*/
     srand(time(NULL));
     char * input;
     if (argc != 2)
@@ -12,7 +19,7 @@ int main(int argc, char** argv) {
     else
         input = argv[1];
 
-    int blk_size = 20;
+    int blk_size = 13;
     /*
     int i=0;
     for (;i < 10; ++i) {

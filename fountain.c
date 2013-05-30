@@ -27,13 +27,35 @@ static int size_in_blocks(const char* string, int blk_size) {
         ? (string_len / blk_size) + 1 : string_len / blk_size;
 }
 
+static int choose_num_blocks(const int n) {
+    int* dist = malloc((1 + n*(n+1)/2) * sizeof *dist);
+    if (!dist) return 1;
+
+    int* lpdist = dist;
+    for (int m = n; m > 0; m--) {
+        for (int i = 0; i < m; i++) {
+            *lpdist++ = n - m + 1;
+        }
+    }
+    *lpdist = -1;
+
+    int d = dist[rand() % (n*(n+1)/2)];
+
+    free(dist);
+    return d;
+}
+
+static int* select_blocks(const int  n) {
+    int d = choose_num_blocks(n);
+
+    int* blocks = malloc(d * sizeof *blocks); 
+}
+
 /* makes a fountain fountain, given a file */
 fountain_s* fmake_fountain(FILE* f, int blk_size) {
     fountain_s* output = malloc(sizeof *output);
-    if (!output) {
-        memerror(__LINE__);
+    if (!output)
         return NULL;
-    }
     memset(output, 0, sizeof *output);
     // get filesize
     fseek(f, 0, SEEK_END);
@@ -41,31 +63,16 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
     int n = (filesize % blk_size)
         ? (filesize /blk_size) + 1 : filesize / blk_size;
 
-    // Create distibution like 111112222333445
-    int* dist = malloc((n*(n+1)/2) * sizeof(*dist));
-    if (!dist)
-        goto free_dist;
-
-    int i, j, m, *lpdist;
-    lpdist = dist;
-    for (m=n; m > 0; m--) {
-        for (i=0; i<m; i++) {
-            *lpdist = n - m + 1;
-            lpdist++;
-        }
-    }
-
     // Pick d
-    int d = rand() % (n*(n+1)/2);
-    d = dist[d];
+    int d = choose_num_blocks(n);
 
     output->num_blocks = d;
     output->block = malloc(d * sizeof *(output->block));
     if (!output->block)
         goto free_ob;
-    for (i = 0; i < d; i++) {
+    for (int i = 0; i < d; i++) {
         output->block[i] = rand() % n;
-        for (j = 0; j < i; j++) {
+        for (int j = 0; j < i; j++) {
             if (output->block[i] == output->block[j]) {
                 i--;
                 break;
@@ -82,8 +89,8 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
     if (!buffer)
         goto free_buffer;
 
-    for (i = 0; i < d; i++) {
-        m = output->block[i] * blk_size;
+    for (int i = 0; i < output->num_blocks; i++) {
+        int m = output->block[i] * blk_size;
         fseek(f, m, SEEK_SET); /* m bytes from beginning of file */
         fread(buffer, 1, blk_size, f);
         xorncpy(output->string, buffer, blk_size);
@@ -91,7 +98,6 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
 
     // Cleanup
     free(buffer);
-    free(dist);
 
     return output;
 
@@ -99,8 +105,6 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
 free_buffer:
 free_os:
 free_ob:
-    free(dist);
-free_dist:
     free_fountain(output);
     return NULL;
 }
@@ -114,31 +118,16 @@ fountain_s* make_fountain(const char* string, int blk_size) {
     memset(output, 0, sizeof *output);
     int n = size_in_blocks(string, blk_size);
 
-    // Create distibution like 111112222333445
-    int* dist = malloc((n*(n+1)/2) * sizeof(*dist));
-    if (!dist)
-        goto free_dist;
-
-    int i, j, m, *lpdist;
-    lpdist = dist;
-    for (m=n; m > 0; m--) {
-        for (i=0; i<m; i++) {
-            *lpdist = n - m + 1;
-            lpdist++;
-        }
-    }
-
     // Pick d
-    int d = rand() % (n*(n+1)/2);
-    d = dist[d];
+    int d = choose_num_blocks(n);
 
     output->num_blocks = d;
     output->block = malloc(d * sizeof *(output->block));
     if (!output->block)
         goto free_ob;
-    for (i = 0; i < d; i++) {
+    for (int i = 0; i < d; i++) {
         output->block[i] = rand() % n;
-        for (j = 0; j < i; j++) {
+        for (int j = 0; j < i; j++) {
             if (output->block[i] == output->block[j]) {
                 i--;
                 break;
@@ -150,20 +139,15 @@ fountain_s* make_fountain(const char* string, int blk_size) {
     output->string = calloc(blk_size+1, sizeof *(output->string));
     if (!output->string)
         goto free_os;
-    for (i = 0; i < d; i++) {
-        m = output->block[i] * blk_size;
+    for (int i = 0; i < output->num_blocks; i++) {
+        int m = output->block[i] * blk_size;
         xorncpy(output->string, string + m, blk_size);
     }
-
-    // Cleanup
-    free(dist);
 
     return output;
 
 free_os:
 free_ob:
-    free(dist);
-free_dist: // failed to create dist so we don't need to free it
     free_fountain(output);
     return NULL;
 }
