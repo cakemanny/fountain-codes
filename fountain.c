@@ -28,7 +28,8 @@ static int size_in_blocks(const char* string, int blk_size) {
 }
 
 static int choose_num_blocks(const int n) {
-    int* dist = malloc((1 + n*(n+1)/2) * sizeof *dist);
+    const int d_size = n*(n+1)/2;
+    int* dist = malloc(d_size * sizeof *dist);
     if (!dist) return 1; /* We ran out of memory, should probs die, but
                           * maybe we can squeeze out one more block */
 
@@ -38,9 +39,8 @@ static int choose_num_blocks(const int n) {
             *lpdist++ = n - m + 1;
         }
     }
-    *lpdist = -1;
 
-    int d = dist[rand() % (n*(n+1)/2)];
+    int d = dist[rand() % d_size];
 
     free(dist);
     return d;
@@ -155,7 +155,35 @@ int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2) {
     return 0;
 }
 
+packethold_s* packethold_new() {
+    packethold_s tmp = {.num_slots=BUFFER_SIZE, .num_packets=0, .offset=0};
+    packethold_s* hold = malloc(sizeof *hold);
+    if (!hold) return NULL;
+
+    *hold = tmp;
+
+    hold->fountain = malloc(BUFFER_SIZE * sizeof *(hold->fountain));
+    if (!hold->fountain) goto free_hold;
+
+    return hold;
+free_hold:
+    packethold_free(hold);
+    return NULL;
+}
+
+void packethold_free(packethold_s* hold) {
+    if (hold->fountain) free(hold->fountain);
+    free(hold);
+}
+
 //TODO: Create a stateless decode_fountain and store state in some structures
+
+/* State struct could look like
+ *
+ * int* blkdecoded;
+ * packethold_s* hold;
+ * int packets_so_far
+ */
 
 char* decode_fountain(const char* string, int blk_size) {
     int n = size_in_blocks(string, blk_size);
@@ -164,8 +192,8 @@ char* decode_fountain(const char* string, int blk_size) {
         memerror(__LINE__);
         return NULL;
     }
-    fountain_s * curr_fountain = NULL;
-    packethold_s hold;
+    fountain_s* curr_fountain = NULL;
+    packethold_s hold = {.num_slots=BUFFER_SIZE, .num_packets=0, .offset=0};
 
     // Create the hold for storing packets for later
     hold.fountain = malloc(BUFFER_SIZE * sizeof *(hold.fountain));
@@ -173,10 +201,6 @@ char* decode_fountain(const char* string, int blk_size) {
         memerror(__LINE__);
         goto hold_exit;
     }
-    hold.num_slots = BUFFER_SIZE;
-    hold.num_packets = 0;
-    hold.offset = 0;
-
 
     int * blkdecoded = calloc(n, sizeof *blkdecoded);
     if (blkdecoded == NULL) {
@@ -208,8 +232,7 @@ char* decode_fountain(const char* string, int blk_size) {
             int match = 0;
             for (i = 0; i < hold.num_packets; i++) {
                 for (j = 0; j < hold.fountain[i].num_blocks; j++ ) {
-                    if (hold.fountain[i].block[j]
-                            == curr_fountain->block[0]) {
+                    if (hold.fountain[i].block[j] == curr_fountain->block[0]) {
                         // Xor out the hold block
                         xorncpy(hold.fountain[i].string,
                                 curr_fountain->string,

@@ -25,4 +25,7 @@ void free_fountain(fountain_s* ftn);
 int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2);
 char* decode_fountain(const char* string, int blk_size);
 
+packethold_s* packethold_new();
+void packethold_free(packethold_s* hold);
+
 #endif /* __FOUNTAIN_H__ */
