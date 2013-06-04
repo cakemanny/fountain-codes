@@ -15,8 +15,7 @@ static char * xorncpy (char* destination, const char* source, register size_t n)
     register char* d = destination;
     register const char* s = source;
     do {
-        if (*s) *d++ ^= *s++;
-        else break;
+        *d++ ^= *s++;
     } while (--n != 0);
     return (destination);
 }
