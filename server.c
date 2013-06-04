@@ -24,20 +24,28 @@ static int create_connection(const char* ip_address);
 static int recvd_hello(client_s * new_client);
 static void close_connection();
 static int send_filename(client_s client, const char * filename);
-int send_std_msg(client_s client, char const * msg);
+static int send_std_msg(client_s client, char const * msg);
 static int send_block_burst(const char * filename);
 
 static SOCKET s;
 static WSADATA w;
+static char const * program_name;
 
-void print_usage_and_exit() {
-    printf("usage: serve filename");
-    exit(0);
+void print_usage_and_exit(int status) {
+    printf("Usage: %s [OPTION]... FILE\n", program_name);
+    fputs("\
+\n\
+  -h, --help        display this help message\n\
+  -i, --ip          set the ip address to listen on default is 0.0.0.0\n\
+  -p, --port        set the UDP port to listen on, default is 2534\n\
+", stdout);
+    exit(status);
 }
 
 int main(int argc, char** argv) {
+    program_name = argv[0];
     if (argc != 2) {
-        print_usage_and_exit();
+        print_usage_and_exit(1);
     }
     char const * filename = argv[1];
 
@@ -119,6 +127,8 @@ void close_connection() {
         closesocket(s);
     WSACleanup();
 }
+
+/* Send a message to a client, terminating in \r\n\r\n, rather than a file */
 
 int send_std_msg(client_s client, char const * msg) {
     sendto(s, msg, strlen(msg), 0,
