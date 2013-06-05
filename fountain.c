@@ -232,6 +232,8 @@ char* decode_fountain(const char* string, int blk_size) {
                         blkdecoded[hold.fountain[i].block[0]] = 1;
                     }
                     // remove from hold
+                    free(hold.fountain[i].string);
+                    free(hold.fountain[i].block);
                     for (j = i; j < hold.num_packets - 1; j++) {
                         hold.fountain[j] = hold.fountain[j+1];
                     }
@@ -336,7 +338,7 @@ int fdecode_fountain(decodestate_s* state, fountain_s* ftn) {
             // TODO: write the block to file
             blkdec[ftn->block[0]] = 1;
         } else { /* block already decoded */
-#define F_ALREADY_DECODED 1
+#define F_ALREADY_DECODED 'a' // TODO move to a defininition file
             return  F_ALREADY_DECODED;
         }
 
@@ -363,7 +365,20 @@ int fdecode_fountain(decodestate_s* state, fountain_s* ftn) {
             }
             if (!match) continue;
             // On success check if hold packet is of size one block
-            //TODO continue me
+            if (hold->fountain[i].num_blocks == 1) {
+                // move into output if we don't already have it
+                fountain_s* tmp_ftn = packethold_remove(hold, i);
+                if (blkdec[tmp_ftn->block[0]] == 0) {
+                    // TODO: write block to file
+
+                    blkdec[tmp_ftn->block[0]] = 1;
+                }
+                free_fountain(tmp_ftn);
+            }
+        }
+    } else { /* size > 1, check against unsolved blocks */
+        for (int i = 0; i < ftn->num_blocks; i++) {
+
         }
     }
 
@@ -396,6 +411,24 @@ void packethold_free(packethold_s* hold) {
     free(hold);
 }
 
+/* Remove the ith item from the hold and return a copy of it */
+fountain_s* packethold_remove(packethold_s* hold, int pos) {
+    fountain_s* output = malloc(sizeof *output);
+    *output = hold->fountain[pos];
+
+    for (int j = pos; j < hold->num_packets - 1; j++)
+        hold->fountain[j] = hold->fountain[j+1];
+    memset(hold->fountain + hold->offset - 1, 0, sizeof *(hold->fountain));
+    hold->offset--;
+    hold->num_packets--;
+
+    /* Check that our packhold is not overly large */
+    if (hold->num_slots > 2 * hold->offset)
+        hold->fountain = realloc(hold->fountain,
+                hold->num_packets * sizeof *(hold->fountain));
+
+    return output;
+}
 
 /* ============ Decode state Functions ===================================== */
 

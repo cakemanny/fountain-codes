@@ -31,8 +31,8 @@ typedef struct decodestate_s {
 /* Function declarations */
 
 /* fountain_s functions */
-fountain_s* make_fountain(const char* string, int blk_size); /* allocates memory */
-fountain_s* fmake_fountain(FILE* f, int blk_size); /* allocates memory */
+fountain_s* make_fountain(const char* string, int blk_size); /* allocs memory */
+fountain_s* fmake_fountain(FILE* f, int blk_size); /* allocs memory */
 void free_fountain(fountain_s* ftn);
 int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2);
 char* decode_fountain(const char* string, int blk_size);
@@ -41,6 +41,7 @@ int fdecode_fountain(decodestate_s* state, fountain_s* fountain);
 /* packethold_s functions */
 packethold_s* packethold_new(); /* allocs memory */
 void packethold_free(packethold_s* hold);
+fountain_s* packethold_remove(packethold_s* hold, int pos); /* allocs memory*/
 
 /* decodestate_s functions */
 decodestate_s* decodestate_new(int blk_size, int num_blocks);
