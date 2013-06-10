@@ -2,6 +2,7 @@
 #define __FOUNTAIN_H__
 
 #include <stdio.h> // FILE
+#include "errors.h"
 
 /* Structure definitions */
 
@@ -29,6 +30,11 @@ typedef struct decodestate_s {
     FILE* fp;
 } decodestate_s;
 
+typedef struct memdecodestate_s {
+    union { struct decodestate_s; decodestate_s state; };
+    char * result;
+} memdecodestate_s;
+
 /* Function declarations */
 
 /* ============ fountain_s functions  ====================================== */
@@ -44,15 +50,12 @@ char* decode_fountain(const char* string, int blk_size);
    returns F_ALREADY_DECODED so, just for our records, we already have decoded
            this block.
  */
-#ifndef ALLOC_ERR
-#   define ALLOC_ERR -1
-#endif 
 #ifndef F_ALREADY_DECODED
 #   define F_ALREADY_DECODED 1
 #endif
 int fdecode_fountain(decodestate_s* state, fountain_s* ftn);
 /* returns 0 on success
-   returns ALLOC_ERR if mem allocation occurs for creating the pointed to
+   returns ERR_MEM if mem allocation occurs for creating the pointed to
            elements.
  */
 int fountain_copy(fountain_s* dst, fountain_s* src, int blk_size); /* allocs memory */
@@ -76,7 +79,15 @@ int packethold_add(packethold_s* hold, fountain_s* ftn, int blk_size);
 
 
 /* ============ decodestate_s functions ==================================== */
+
+/* Creates a new packehold with items
+     blk_size, num_blocks, blkdecoded, hold, packets_so_far
+   assigned and initialized
+     filename, fp
+   initialized as NULL
+ */
 decodestate_s* decodestate_new(int blk_size, int num_blocks);
 void decodestate_free(decodestate_s* state);
+int decodestate_is_decoded(decodestate_s* state); 
 
 #endif /* __FOUNTAIN_H__ */
