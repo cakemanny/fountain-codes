@@ -2,7 +2,11 @@
 #include <stdio.h> //fprintf
 #include <stdlib.h> //exit
 
-#define ENDL "\r\n"
+#ifdef _WIN_32
+#   define ENDL "\r\n"
+#else
+#   define ENDL "\n"
+#endif
 #define ERR stderr
 
 #define pe(...) fprintf(ERR, __VA_ARGS__)
@@ -15,7 +19,7 @@ int handle_error(int error_number, void* args) {
             exit(error_number);
             break;
         case ERR_MEM:
-            pe("Error: couldn't allocate memory %s" ENDL, fargs(args));
+            pe("Error: couldn't allocate memory %s" ENDL, margs(args));
             break;
         case ERR_BWRITE:
             pe("Error writing to the output file: %s" ENDL, fargs(args));

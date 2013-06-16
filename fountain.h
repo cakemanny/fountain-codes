@@ -10,6 +10,7 @@ typedef struct fountain_s {
     char* string;
     int num_blocks;
     int* block; // they start from block 0 -- TODO rename this blocks
+    int blk_size;
 } fountain_s;
 
 typedef struct packethold_s {
@@ -26,7 +27,7 @@ typedef struct decodestate_s {
     char* blkdecoded;
     packethold_s* hold;
     int packets_so_far;
-    char* filename;
+    char* filename; /* must be in w+ mode */
     FILE* fp;
 } decodestate_s;
 

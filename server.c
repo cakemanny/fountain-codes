@@ -30,11 +30,13 @@ static int send_block_burst(const char * filename);
 static SOCKET s;
 static WSADATA w;
 static char const * program_name;
+static int blk_size = 128; /* better to set this based on filesize */
 
 void print_usage_and_exit(int status) {
     printf("Usage: %s [OPTION]... FILE\n", program_name);
     fputs("\
 \n\
+  -b, --blocksize   manually set the blocksize in bytes\n\
   -h, --help        display this help message\n\
   -i, --ip          set the ip address to listen on default is 0.0.0.0\n\
   -p, --port        set the UDP port to listen on, default is 2534\n\
@@ -153,6 +155,7 @@ int send_block_burst(const char * filename) {
         
         // make a fountain
         // send it across the air
+        fountain_s* ftn = fmake_fountain(f, blk_size);
     }
 
     fclose(f);
