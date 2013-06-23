@@ -4,13 +4,9 @@
 #include <string.h>
 #include "errors.h"
 #include "fountain.h"
+#include "dbg.h"
 
 #define BUFFER_SIZE 256
-
-static inline void memerror(int line) {
-    printf("Memory allocation error, Line: %d", line);
-    return;
-}
 
 static char * xorncpy (char* destination, const char* source, register size_t n) {
     register char* d = destination;
@@ -51,7 +47,7 @@ static int select_blocks(const int n, fountain_s* ftn) {
     int d = choose_num_blocks(n);
 
     int* blocks = malloc(d * sizeof *blocks);
-    if (!blocks) return -1;
+    if (!blocks) return ERR_MEM;
 
     for (int i = 0; i < d; i++) {
         blocks[i] = rand() % n;
@@ -81,20 +77,20 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
         ? (filesize /blk_size) + 1 : filesize / blk_size;
     output->blk_size = blk_size;
 
-    if (select_blocks(n, output) < 0) goto free_ob;
+    if (select_blocks(n, output) < 0) goto free_ftn;
 
     // XOR blocks together
     output->string = calloc(blk_size + 1, sizeof *output->string);
-    if (!output->string) goto free_os;
+    if (!output->string) goto free_ob;
 
     char * buffer = malloc(blk_size);
-    if (!buffer) goto free_buffer;
+    if (!buffer) goto free_os;
 
     for (int i = 0; i < output->num_blocks; i++) {
         int m = output->block[i] * blk_size;
         fseek(f, m, SEEK_SET); /* m bytes from beginning of file */
-        fread(buffer, 1, blk_size, f);
-        xorncpy(output->string, buffer, blk_size);
+        int bytes = fread(buffer, 1, blk_size, f);
+        xorncpy(output->string, buffer, bytes);
     }
 
     // Cleanup
@@ -102,10 +98,9 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
 
     return output;
 
-    // free(buffer) // dead
-free_buffer:
 free_os:
 free_ob:
+free_ftn:
     free_fountain(output);
     return NULL;
 }
@@ -149,7 +144,7 @@ int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2) {
         return ret;
     if (( ret = (ftn1->num_blocks - ftn2->num_blocks) ))
         return ret;
-    if (( ret = memcmp(ftn1->string, ftn2->string, ftn1->blk_size) )) //FIXME change this to memcmp
+    if (( ret = memcmp(ftn1->string, ftn2->string, ftn1->blk_size) ))
         return ret;
 
     for (int i=0; i < ftn1->num_blocks; ++i) {
@@ -282,7 +277,7 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
         }
         if (!inhold) { /* Add packet to hold */
             if (packethold_add(hold, ftn, blk_size) < 0)
-                return handle_error(ERR_PACKET_ADD, 0);
+                return handle_error(ERR_PACKET_ADD, NULL);
         }
     }
 
@@ -347,6 +342,7 @@ char* decode_fountain(const char* string, int blk_size) {
     fountain_s* ftn = NULL;
     do {
         ftn = make_fountain(string, blk_size);
+        if (!ftn) goto cleanup;
         state->packets_so_far += 1;
         result = _decode_fountain(state, ftn, &sblockread, &sblockwrite);
         free_fountain(ftn);
@@ -404,14 +400,18 @@ fountain_s* packethold_remove(packethold_s* hold, int pos) {
 
     /* Check that our packhold is not overly large */
     if (hold->num_slots > 2 * hold->offset && hold->num_slots > BUFFER_SIZE) {
-        fountain_s* tmp_ptr = hold->fountain;
-        hold->fountain = realloc(hold->fountain,
+        debug("reducing packethold size");
+        odebug("%d", hold->num_packets);
+        odebug("%d", hold->offset);
+        odebug("%d", hold->num_slots);
+        fountain_s* tmp_ptr = realloc(hold->fountain,
                 hold->num_packets * sizeof *hold->fountain);
-        if (hold->fountain == NULL) {
-            hold->fountain = tmp_ptr;
+        if (tmp_ptr) hold->fountain = tmp_ptr;
+        else {
             handle_error(REALLOC_ERR, NULL);
             return NULL;
         }
+        hold->num_slots = hold->num_packets;
     }
 
     return output;
@@ -419,7 +419,8 @@ fountain_s* packethold_remove(packethold_s* hold, int pos) {
 
 int packethold_add(packethold_s* hold, fountain_s* ftn, int blk_size) {
     if (hold->offset >= hold->num_slots) {
-        int space = 2 * hold->num_slots /3;
+        int space = 3 * hold->num_slots /2;
+        odebug("%d", space);
 
         fountain_s* tmp_ptr = hold->fountain;
         hold->fountain = realloc(hold->fountain, space * sizeof *hold->fountain);

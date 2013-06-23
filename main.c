@@ -1,10 +1,27 @@
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h> //strlen
 #include <time.h>
-#include <unistd.h>
+#include <unistd.h> //getopt
 #include "asprintf.h"
 #include "fountain.h"
+#include "dbg.h"
+
+#ifdef _WIN_32
+#   define ENDL "\r\n"
+#else
+#   define ENDL "\n"
+#endif
+
+// ----- types ------
+typedef fountain_s* (*fountain_src)(void);
+
+// ------ static variables ------
+static char* infilename = NULL;
+static char* outfilename = NULL;
+static int blk_size = 128;
+static char* meminput = "Hello there you jammy little bugger!";
 
 static int filesize(char const * filename) {
     FILE* f = fopen(filename, "rb");
@@ -17,28 +34,44 @@ static int filesize(char const * filename) {
     return ERR_FOPEN;
 }
 
-int proc_file(char const * filename) {
+static int fsize_in_blocks(char const * filename) {
+    int fsize = filesize(filename);
+    return (fsize % blk_size)
+        ? (fsize / blk_size) + 1 : fsize / blk_size;
+}
+
+static int size_in_blocks(const char* string, int blk_size) {
+    int string_len = strlen(string);
+    return (string_len % blk_size)
+        ? (string_len / blk_size) + 1 : string_len / blk_size;
+}
+
+static fountain_s* from_file() {
+    fountain_s* output = NULL;
+    if (infilename) {
+        FILE* infile = fopen(infilename, "rb");
+        if (infile) {
+            output = fmake_fountain(infile, blk_size);
+            fclose(infile);
+        }
+    }
+    return output;
+}
+
+static fountain_s* from_mem() {
+    return make_fountain(meminput, blk_size);
+}
+
+static int proc_file(fountain_src ftn_src) {
     int result = 0;
     char * err_str = NULL;
-    // open the input file
-    FILE* infile = fopen(filename, "rb");
-    if (!infile) return ERR_FOPEN;
-
-    
-    printf("Opened the input file successfully: %s\n", filename); //DEBUG
 
     // prepare to do some output
-    int blk_size = 128;
-    int fsize = filesize(filename);
-    int num_blocks = (fsize % blk_size)
-        ? (fsize / blk_size) + 1 : fsize / blk_size;
+    int num_blocks = (ftn_src == from_file) ?
+        fsize_in_blocks(infilename) : size_in_blocks(meminput, blk_size);
 
     decodestate_s* state = decodestate_new(blk_size, num_blocks);
-    if (!state) {result = ERR_MEM; goto free_inf; }
-
-    char * outfilename = NULL;
-    if (asprintf(&outfilename, "%s.output", filename) < 0) {
-        result = ERR_MEM; goto close_infile; }
+    if (!state) return handle_error(ERR_MEM, NULL);
 
     state->filename = outfilename;
     state->fp = fopen(outfilename, "wb+");
@@ -47,59 +80,61 @@ int proc_file(char const * filename) {
 
     fountain_s* ftn = NULL;
     do {
-        ftn = fmake_fountain(infile, blk_size);
+        ftn = ftn_src();
+        if (!ftn) goto cleanup;
         state->packets_so_far++;
         result = fdecode_fountain(state, ftn);
-        free(ftn);
+        free_fountain(ftn);
         if (result < 0) goto cleanup;
     } while (!decodestate_is_decoded(state));
+
+    odebug("%d", state->packets_so_far);
 
 cleanup:
     fclose(state->fp);
 free_state:
     decodestate_free(state);
-free_inf:
-    free(outfilename);
-close_infile:
-    fclose(infile);
     return handle_error(result, err_str);
 }
 
 /* Program entry point */
 int main(int argc, char** argv) {
-    char* filename = NULL;
-
     int c;
-    while ( (c = getopt(argc, argv, "f:")) != -1) {
+    while ( (c = getopt(argc, argv, "f:o:")) != -1) {
         switch (c) {
             case 'f':
-                filename = optarg;
+                infilename = optarg;
+                break;
+            case 'o':
+                outfilename = optarg;
                 break;
         }
     }
+    if (optind < argc)
+        meminput = argv[optind];
 
     /* seed random number generation */
     srand(time(NULL));
 
-    if (filename) {
+    fountain_src ftn_src = NULL;
+    if (infilename)
+        ftn_src = from_file;
+    else
+        ftn_src = from_mem;
+
+    if (outfilename) {
         int error;
-        if ((error = proc_file(filename)) < 0) {
-            handle_error(error, filename); return 1; }
-        printf("Output written to %s.output", filename);
+        if ((error = proc_file(ftn_src)) < 0) {
+            handle_error(error, infilename); return 1; }
+        printf("Output written to %s" ENDL, outfilename);
         return 0;
     }
 
-    char * input;
-    if (argc != 2)
-        input = "Hello there you jammy little bugger!";
-    else
-        input = argv[1];
+    //int blk_size = 13;
 
-    int blk_size = 13;
-
-    char * decoded = decode_fountain(input, blk_size);
-    printf("Input-: %s\n", input);
-    printf("Output: %s\n", decoded);
+    char * decoded = decode_fountain(meminput, blk_size);
+    printf("Input-: %s" ENDL, meminput);
+    printf("Output: %s" ENDL, decoded);
     free(decoded);
 
     return 0;
