@@ -402,7 +402,7 @@ fountain_s* packethold_remove(packethold_s* hold, int pos) {
     if (hold->num_slots > 2 * hold->offset && hold->num_slots > BUFFER_SIZE) {
         debug("reducing packethold size");
         odebug("%d", hold->num_packets);
-        odebug("%d", hold->offset);
+        odebug("%zd", hold->offset);
         odebug("%d", hold->num_slots);
         fountain_s* tmp_ptr = realloc(hold->fountain,
                 hold->num_packets * sizeof *hold->fountain);
