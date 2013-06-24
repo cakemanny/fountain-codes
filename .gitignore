@@ -1,0 +1,5 @@
+# Object files
+*.o
+# binaries (not sure how to include linux ones)
+*.exe
+

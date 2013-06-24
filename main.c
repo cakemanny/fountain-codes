@@ -4,7 +4,9 @@
 #include <string.h> //strlen
 #include <time.h>
 #include <unistd.h> //getopt
-#include "asprintf.h"
+#ifdef _WIN_32
+#   include "asprintf.h"
+#endif
 #include "fountain.h"
 #include "dbg.h"
 

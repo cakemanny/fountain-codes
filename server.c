@@ -4,7 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "asprintf.h"
+#ifdef _WIN_32
+#   include "asprintf.h"
+#endif
 #include "errors.h"
 #include "fountain.h"
 
