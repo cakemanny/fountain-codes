@@ -155,7 +155,8 @@ int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2) {
     return 0;
 }
 
-int fountain_copy(fountain_s* dst, fountain_s* src, int blk_size) {
+int fountain_copy(fountain_s* dst, fountain_s* src) {
+    int blk_size = (dst->blk_size = src->blk_size);
     dst->num_blocks = src->num_blocks;
 
     dst->string = malloc(blk_size * sizeof *dst->string);
@@ -269,14 +270,14 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
         if (retest) return _decode_fountain(state, ftn, bread, bwrite);
 
         bool inhold = false;
-        for (size_t i = 0; i <= hold->offset; i++) {
+        for (size_t i = 0; i < hold->offset; i++) {
             if (cmp_fountain(ftn, hold->fountain + i) == 0) {
                 inhold = true;
                 break;
             }
         }
         if (!inhold) { /* Add packet to hold */
-            if (packethold_add(hold, ftn, blk_size) < 0)
+            if (packethold_add(hold, ftn) < 0)
                 return handle_error(ERR_PACKET_ADD, NULL);
         }
     }
@@ -417,7 +418,7 @@ fountain_s* packethold_remove(packethold_s* hold, int pos) {
     return output;
 }
 
-int packethold_add(packethold_s* hold, fountain_s* ftn, int blk_size) {
+int packethold_add(packethold_s* hold, fountain_s* ftn) {
     if (hold->offset >= hold->num_slots) {
         int space = 3 * hold->num_slots /2;
         odebug("%d", space);
@@ -432,7 +433,7 @@ int packethold_add(packethold_s* hold, fountain_s* ftn, int blk_size) {
         hold->num_slots = space;
     }
     
-    if (fountain_copy(&hold->fountain[hold->offset++], ftn, blk_size) < 0)
+    if (fountain_copy(&hold->fountain[hold->offset++], ftn) < 0)
         return ERR_MEM;
     hold->num_packets++;
     return 0;

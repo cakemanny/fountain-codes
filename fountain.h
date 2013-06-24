@@ -59,7 +59,7 @@ int fdecode_fountain(decodestate_s* state, fountain_s* ftn);
    returns ERR_MEM if mem allocation occurs for creating the pointed to
            elements.
  */
-int fountain_copy(fountain_s* dst, fountain_s* src, int blk_size); /* allocs memory */
+int fountain_copy(fountain_s* dst, fountain_s* src); /* allocs memory */
 
 
 /* ============ packethold_s functions  ==================================== */
@@ -76,7 +76,7 @@ fountain_s* packethold_remove(packethold_s* hold, int pos); /* allocs memory*/
 #ifndef REALLOC_ERR
 #   define REALLOC_ERR -2
 #endif
-int packethold_add(packethold_s* hold, fountain_s* ftn, int blk_size);
+int packethold_add(packethold_s* hold, fountain_s* ftn);
 
 
 /* ============ decodestate_s functions ==================================== */
