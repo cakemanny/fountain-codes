@@ -8,10 +8,20 @@ PORT = 2534
 def main():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.sendto(bytes('FCWAITING\r\n','UTF-8'), (HOST,PORT))
+    s.settimeout(10);
     try:
         (data, address) = s.recvfrom(1024)
         print("from address:", address)
         print("data:", data)
+    except ConnectionResetError as e:
+        print('The server is not currently listening / taking connections:')
+        print( e)
+
+    try:
+        while data:
+            (data, address) = s.recvfrom(1024 * 1024)
+            print("from address:", address)
+            print("data:", data)
     except ConnectionResetError as e:
         print('The server is not currently listening / taking connections:')
         print( e)

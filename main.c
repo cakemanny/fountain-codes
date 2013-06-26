@@ -4,13 +4,13 @@
 #include <string.h> //strlen
 #include <time.h>
 #include <unistd.h> //getopt
-#ifdef _WIN_32
+#ifdef _WIN32
 #   include "asprintf.h"
 #endif
 #include "fountain.h"
 #include "dbg.h"
 
-#ifdef _WIN_32
+#ifdef _WIN32
 #   define ENDL "\r\n"
 #else
 #   define ENDL "\n"

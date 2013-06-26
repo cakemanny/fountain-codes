@@ -2,13 +2,16 @@
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include <stdlib.h> //memcpy
 #include <string.h>
-#ifdef _WIN_32
+#include <time.h> //time
+#include <unistd.h> //getopt
+#ifdef _WIN32
 #   include "asprintf.h"
 #endif
 #include "errors.h"
 #include "fountain.h"
+#include "dbg.h"
 
 #define LISTEN_PORT 2534
 #define LISTEN_IP "127.0.0.1"
@@ -27,14 +30,19 @@ static int recvd_hello(client_s * new_client);
 static void close_connection();
 static int send_filename(client_s client, const char * filename);
 static int send_std_msg(client_s client, char const * msg);
-static int send_block_burst(const char * filename);
+static int packet_size(fountain_s* ftn);
+static char* pack_fountain(fountain_s* ftn);
+static int send_fountain(client_s client, fountain_s* ftn);
+static int send_block_burst(client_s client, const char * filename);
 
 static SOCKET s;
 static WSADATA w;
+static int listen_port = LISTEN_PORT;
+static char* listen_ip = LISTEN_IP;
 static char const * program_name;
 static int blk_size = 128; /* better to set this based on filesize */
 
-void print_usage_and_exit(int status) {
+static void print_usage_and_exit(int status) {
     printf("Usage: %s [OPTION]... FILE\n", program_name);
     fputs("\
 \n\
@@ -47,11 +55,37 @@ void print_usage_and_exit(int status) {
 }
 
 int main(int argc, char** argv) {
+    /* deal with options */
     program_name = argv[0];
-    if (argc != 2) {
+    int c;
+    while ( (c = getopt(argc, argv, "b:hi:p:")) != -1) {
+        switch (c) {
+            case 'b':
+                blk_size = atoi(optarg);
+                break;
+            case 'h':
+                print_usage_and_exit(0);
+                break;
+            case 'i':
+                listen_ip = optarg;
+                break;
+            case 'p':
+                listen_port = atoi(optarg);
+                break;
+            case '?':
+            fprintf(stderr, "bad option %s\n", optopt);
+                break;
+        }
+    }
+    char const * filename;
+    if (optind < argc) {
+        filename = argv[optind];
+    } else {
         print_usage_and_exit(1);
     }
-    char const * filename = argv[1];
+
+    /* seed random number generation */
+    srand(time(NULL));
 
     // Check that the file exists
     FILE* f = fopen(filename, "r");
@@ -59,11 +93,11 @@ int main(int argc, char** argv) {
     fclose(f);
 
     int error;
-    if ((error = create_connection(LISTEN_IP)) < 0) {
+    if ((error = create_connection(listen_ip)) < 0) {
         close_connection();
         return -1;
     }
-    printf("Listening on " LISTEN_IP ":%d ..." ENDL, LISTEN_PORT);
+    printf("Listening on %s:%d ..." ENDL,listen_ip, listen_port);
 
     client_s client;
 
@@ -77,7 +111,7 @@ int main(int argc, char** argv) {
             */
             if ((error = send_filename(client, filename)) < 0)
                 handle_error(error, NULL);
-            if ((error = send_block_burst(filename)) < 0)
+            if ((error = send_block_burst(client, filename)) < 0)
                 handle_error(error, &filename);
         }
     }
@@ -100,7 +134,7 @@ int create_connection(const char* ip_address) {
 
     memset(&addr, 0, sizeof addr);
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(LISTEN_PORT);
+    addr.sin_port = htons(listen_port);
     addr.sin_addr.s_addr = inet_addr(ip_address);
 
     if (bind(s, (struct sockaddr*)&addr, sizeof addr) == SOCKET_ERROR)
@@ -150,15 +184,57 @@ int send_filename(client_s client, const char * filename) {
     return 0;
 }
 
-int send_block_burst(const char * filename) {
+int packet_size(fountain_s* ftn) {
+    return sizeof *ftn
+            + ftn->blk_size
+            + ftn->num_blocks * sizeof *ftn->block;
+}
+
+char* pack_fountain(fountain_s* ftn) {
+
+    void* packed_ftn = malloc(packet_size(ftn));
+    if (!packed_ftn) return NULL;
+
+    memcpy(packed_ftn, ftn, sizeof *ftn);
+    memcpy(packed_ftn + sizeof *ftn, ftn->string, ftn->blk_size);
+    memcpy(packed_ftn + sizeof *ftn + ftn->blk_size,
+            ftn->block,
+            ftn->num_blocks * sizeof *ftn->block);
+
+    fountain_s* f_ptr = (fountain_s*) packed_ftn;
+    f_ptr->string = packed_ftn + sizeof *ftn;
+    f_ptr->block = packed_ftn + sizeof *ftn + ftn->blk_size;
+
+    return (char*) packed_ftn;
+}
+
+int send_fountain(client_s client, fountain_s* ftn) {
+    char* packet = pack_fountain(ftn);
+    if (packet == NULL) return ERR_PACKING;
+
+    int bytes_sent = sendto(s, packet, packet_size(ftn), 0,
+            (struct sockaddr*)&client.address,
+            sizeof client.address);
+
+    free(packet);
+
+    if (bytes_sent == SOCKET_ERROR) return SOCKET_ERROR;
+    return 0;
+}
+
+int send_block_burst(client_s client, const char * filename) {
     FILE* f = fopen(filename, "r");
     if (!f) return ERR_FOPEN;
     for (int i = 0; i < BURST_SIZE; i++) {
-        
         // make a fountain
         // send it across the air
         fountain_s* ftn = fmake_fountain(f, blk_size);
+        if (ftn == NULL) return ERR_MEM;
+        int error = send_fountain(client, ftn);
+        if (error < 0) handle_error(error, NULL);
+        free_fountain(ftn);
     }
+    log_info("Sent packet burst of size %d", BURST_SIZE);
 
     fclose(f);
     return 0;

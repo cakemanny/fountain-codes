@@ -2,7 +2,7 @@
 #include <stdio.h> //fprintf
 #include <stdlib.h> //exit
 
-#ifdef _WIN_32
+#ifdef _WIN32
 #   define ENDL "\r\n"
 #else
 #   define ENDL "\n"
@@ -33,6 +33,9 @@ int handle_error(int error_number, void* args) {
             pe("An error occured when trying to reallocate memory for the "
                     "hold %s" ENDL, margs(args));
             exit(error_number);
+            break;
+        case ERR_PACKING:
+            pe("An error occured while trying to pack the packet" ENDL);
             break;
         default:
             return 0;
