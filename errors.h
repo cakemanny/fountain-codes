@@ -8,6 +8,7 @@
 #define ERR_BREAD       (-4)
 #define ERR_PACKET_ADD  (-5)
 #define ERR_PACKING     (-6)
+#define ERR_CONNECTION  (-7)
 
 //#define VA_NUM_ARGS(...) VA_NUM_ARGS_IMPL(__VA_ARGS__, 5, 4, 3, 2, 1)
 //#define VA_NUM_ARGS_IMPL(_1,_2,_3,_4,_5,N,...) N

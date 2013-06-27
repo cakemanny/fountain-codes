@@ -48,7 +48,7 @@ static void print_usage_and_exit(int status) {
 \n\
   -b, --blocksize   manually set the blocksize in bytes\n\
   -h, --help        display this help message\n\
-  -i, --ip          set the ip address to listen on default is 0.0.0.0\n\
+  -i, --ip          set the ip address to listen on default is 127.0.0.1\n\
   -p, --port        set the UDP port to listen on, default is 2534\n\
 ", stdout);
     exit(status);
@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
 
     int hello;
     while ((hello = recvd_hello(&client)) >= 0) {
-        if (hello) {
+        if (hello == 1) {
             printf("Received connection..." ENDL);
             /* == do some file transfering ==
              * send file signature
@@ -114,6 +114,9 @@ int main(int argc, char** argv) {
             if ((error = send_block_burst(client, filename)) < 0)
                 handle_error(error, &filename);
         }
+        // accept SIZEINBLOCKS request
+        // accept BLOCKSIZE request
+        // accept FILENAME request
     }
 
     close_connection();

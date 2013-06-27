@@ -37,6 +37,9 @@ int handle_error(int error_number, void* args) {
         case ERR_PACKING:
             pe("An error occured while trying to pack the packet" ENDL);
             break;
+        case ERR_CONNECTION:
+            pe("An error occurred trying create the socket" ENDL);
+            break;
         default:
             return 0;
     }
