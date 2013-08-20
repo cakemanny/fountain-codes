@@ -106,7 +106,7 @@ void close_connection() {
 static int send_msg(server_s server, char const * msg) {
     sendto(s, msg, strlen(msg), 0,
             (struct sockaddr*)&server.address,
-            sizeof server.address);
+            sizeof server.address); //FIXME - check return code
     return 0;
 }
 
@@ -117,6 +117,34 @@ static fountain_s* from_network() {
 static int nsize_in_blocks() {
     send_msg(curr_server, "SIZEINBLOCKS" ENDL);
     //TODO set up a buffer to recv the size in
+    
+    char buf[BUF_LEN];
+    int bytes_recvd = 0;
+
+    struct sockaddr_in remote_addr;
+    int remote_addr_size = sizeof remote_addr;
+
+    do {
+        memset(buf, '\0', BUF_LEN);
+        bytes_recvd = recvfrom(s, buf, BUF_LEN, 0,
+                        (struct sockaddr*)&remote_addr,
+                        &remote_addr_size);
+        if (bytes_recvd < 0)
+            return ERR_NETWORK;
+    } while (remote_addr != curr_server.address);
+
+    int output = 0;
+    if (memcmp(buf, "SIZEINBLOCKS ", 1 - sizeof "SIZEINBLOCKS ") == 0) {
+        for (int i = 0; i < BUF_LEN - 1; i++) {
+            if (buf[i] == '\r' && buf[i+1] == '\n') {
+                buf[i] = 0;
+                buf[i+1] = 0;
+            }
+        }
+        output = atoi(buf + sizeof "SIZEINBLOCKS ");
+    }
+
+    //CONTINUE HERE
 }
 
 static int proc_file(fountain_src ftn_src) {
