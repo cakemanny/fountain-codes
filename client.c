@@ -110,6 +110,33 @@ static int send_msg(server_s server, char const * msg) {
     return 0;
 }
 
+// unpack the fountain... do we allocate new memory, yes because of free later
+// with inner structs
+static fountain_s* unpack_fountain(char const * packed_ftn) {
+    if (!packed_ftn) return NULL;
+
+    fountain_s* ftn = malloc(sizeof *ftn);
+    if (!ftn) return handle_error(ERR_MEM, NULL);
+    memcpy(ftn, packed_ftn, sizeof *ftn);
+
+    ftn->string = malloc(ftn->blk_size);
+    if (!ftn->string) goto free_fountain;
+    memcpy(ftn->string, packed_ftn + sizeof *ftn, ftn->blk_size);
+
+    ftn->block = malloc(ftn->num_blocks * sizeof *ftn->block);
+    if (!ftn-block) goto free_string;
+    memcpy(ftn->block, packed_ftn + sizeof *ftn + ftn->blk_size,
+            ftn->num_blocks * sizeof *ftn->block);
+
+    return ftn;
+free_string:
+    free(ftn->string);
+free_fountain:
+    free(ftn);
+    // should we have a more resilient handler / a kinder one...
+    return handle_error(ERR_MEM, NULL); 
+}
+
 static fountain_s* from_network() {
     send_msg(curr_server, "FCWAITING" ENDL);
 }
@@ -133,7 +160,7 @@ static int nsize_in_blocks() {
             return ERR_NETWORK;
     } while (remote_addr != curr_server.address);
 
-    int output = 0;
+    int output = 0; // Shouldn't the following be 1+ rather than 1 -
     if (memcmp(buf, "SIZEINBLOCKS ", 1 - sizeof "SIZEINBLOCKS ") == 0) {
         for (int i = 0; i < BUF_LEN - 1; i++) {
             if (buf[i] == '\r' && buf[i+1] == '\n') {
@@ -147,6 +174,9 @@ static int nsize_in_blocks() {
     //CONTINUE HERE
 }
 
+/* process fountains as they come down the wire
+   returns a status code (see errors.c)
+ */
 static int proc_file(fountain_src ftn_src) {
     int result = 0;
     char * err_str = NULL;

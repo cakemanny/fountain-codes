@@ -193,6 +193,8 @@ int packet_size(fountain_s* ftn) {
             + ftn->num_blocks * sizeof *ftn->block;
 }
 
+/* Serializes the sub-structures so that we can send it across the network
+ */
 char* pack_fountain(fountain_s* ftn) {
 
     void* packed_ftn = malloc(packet_size(ftn));
