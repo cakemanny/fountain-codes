@@ -1,17 +1,42 @@
 #define _GNU_SOURCE // asks stdio.h to include asprintf
-#define WIN32_LEAN_AND_MEAN
-#include <winsock2.h>
+
+/* Load in the correct networking libraries for the OS */
+#ifdef _WIN32
+#   define WIN32_LEAN_AND_MEAN
+#   include <winsock2.h>
+#else
+#   include <sys/types.h>
+#   include <netinet/in.h>
+#   include <arpa/inet.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h> //memcpy
 #include <string.h>
 #include <time.h> //time
 #include <unistd.h> //getopt
+
+/* Windows doesn't seem to provide asprintf.h... */
 #ifdef _WIN32
 #   include "asprintf.h"
 #endif
 #include "errors.h"
 #include "fountain.h"
 #include "dbg.h"
+
+/* define SOCKET as int for unix */
+#ifndef SOCKET
+#   define SOCKET int
+#endif /* SOCKET */
+
+/* define SOCKET_ERROR as -1 */
+#ifndef SOCKET_ERROR
+#   define SOCKET_ERROR -1
+#endif
+/* define INVALID_SOCKET as -1 for unix people */ 
+#ifndef INVALID_SOCKET
+#   define INVALID_SOCKET -1
+#endif
 
 #define LISTEN_PORT 2534
 #define LISTEN_IP "127.0.0.1"
@@ -36,7 +61,9 @@ static int send_fountain(client_s client, fountain_s* ftn);
 static int send_block_burst(client_s client, const char * filename);
 
 static SOCKET s;
+#ifdef _WIN32
 static WSADATA w;
+#endif /* _WIN32 */
 static int listen_port = LISTEN_PORT;
 static char* listen_ip = LISTEN_IP;
 static char const * program_name;
@@ -126,6 +153,7 @@ int main(int argc, char** argv) {
 int create_connection(const char* ip_address) {
     struct sockaddr_in addr;
 
+    #ifdef _WIN32
     if (WSAStartup(0x0202, &w))
         return -10;
     if (w.wVersion != 0x0202)
@@ -134,13 +162,16 @@ int create_connection(const char* ip_address) {
     s = socket(AF_INET, SOCK_DGRAM, 0);
     if (s == INVALID_SOCKET)
         return -30;
-
+    #else
+    if ((s = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+        return -30;
+    #endif
     memset(&addr, 0, sizeof addr);
     addr.sin_family = AF_INET;
     addr.sin_port = htons(listen_port);
     addr.sin_addr.s_addr = inet_addr(ip_address);
 
-    if (bind(s, (struct sockaddr*)&addr, sizeof addr) == SOCKET_ERROR)
+    if (bind(s, (struct sockaddr*)&addr, sizeof addr) < 0)
         return -40;
 
     return 0;
@@ -164,9 +195,14 @@ int recvd_hello(client_s * new_client) {
 }
 
 void close_connection() {
+    #ifdef _WIN32
     if (s)
         closesocket(s);
     WSACleanup();
+    #else
+    if (s)
+        close(s);
+    #endif
 }
 
 /* Send a message to a client, terminating in \r\n\r\n, rather than a file */

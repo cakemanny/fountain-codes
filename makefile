@@ -1,17 +1,25 @@
-CC=gcc -std=c11
+ifndef CC
+	CC=gcc -std=c11
+endif
 CFLAGS=-g -Wall -c -O0 -fms-extensions
 #CFLAGS= -Wall -c -O3 -fms-extensions -march=native
 LDFLAGS=
 #LDFLAGS=-flto
-LDLIBS=-lws2_32
-TARGETS=fountain.exe server.exe
+
+ifeq "$(OS)" "Windows_NT" 
+	LDLIBS=-lws2_32
+	TARGETS=fountain.exe server.exe
+else
+	TARGETS=fountain server
+endif
+
 
 all: $(TARGETS)
 
-fountain.exe: main.o fountain.o errors.o
+fountain: main.o fountain.o errors.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-server.exe: server.o fountain.o errors.o
+server: server.o fountain.o errors.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 %.o: %.c
