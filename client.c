@@ -1,6 +1,5 @@
 #define _GNU_SOURCE // asks stdio.h to include asprintf
-#define WIN32_LEAN_AND_MEAN
-#include <winsock2.h>
+#include "networking.h"
 #include <stdio.h>
 #include <stdlib.h> //memcpy
 #include <string.h>
@@ -58,7 +57,7 @@ int main(int argc, char** argv) {
                 port = atoi(optarg);
                 break;
             case '?':
-                fprintf(stderr, "bad option %s\n", optopt);
+                fprintf(stderr, "bad option %c\n", optopt);
                 print_usage_and_exit(1);
                 break;
         }

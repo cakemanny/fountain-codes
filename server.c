@@ -1,14 +1,7 @@
 #define _GNU_SOURCE // asks stdio.h to include asprintf
 
 /* Load in the correct networking libraries for the OS */
-#ifdef _WIN32
-#   define WIN32_LEAN_AND_MEAN
-#   include <winsock2.h>
-#else
-#   include <sys/types.h>
-#   include <netinet/in.h>
-#   include <arpa/inet.h>
-#endif
+#include "networking.h"
 
 #include <stdio.h>
 #include <stdlib.h> //memcpy
@@ -23,20 +16,6 @@
 #include "errors.h"
 #include "fountain.h"
 #include "dbg.h"
-
-/* define SOCKET as int for unix */
-#ifndef SOCKET
-#   define SOCKET int
-#endif /* SOCKET */
-
-/* define SOCKET_ERROR as -1 */
-#ifndef SOCKET_ERROR
-#   define SOCKET_ERROR -1
-#endif
-/* define INVALID_SOCKET as -1 for unix people */ 
-#ifndef INVALID_SOCKET
-#   define INVALID_SOCKET -1
-#endif
 
 #define LISTEN_PORT 2534
 #define LISTEN_IP "127.0.0.1"
@@ -100,7 +79,7 @@ int main(int argc, char** argv) {
                 listen_port = atoi(optarg);
                 break;
             case '?':
-            fprintf(stderr, "bad option %s\n", optopt);
+            fprintf(stderr, "bad option %c\n", optopt);
                 break;
         }
     }
@@ -158,14 +137,12 @@ int create_connection(const char* ip_address) {
         return -10;
     if (w.wVersion != 0x0202)
         return -20;
+    #endif
 
     s = socket(AF_INET, SOCK_DGRAM, 0);
     if (s == INVALID_SOCKET)
         return -30;
-    #else
-    if ((s = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
-        return -30;
-    #endif
+
     memset(&addr, 0, sizeof addr);
     addr.sin_family = AF_INET;
     addr.sin_port = htons(listen_port);
@@ -180,7 +157,7 @@ int create_connection(const char* ip_address) {
 int recvd_hello(client_s * new_client) {
     char buf[BUF_LEN];
     struct sockaddr_in remote_addr;
-    int remote_addr_size = sizeof remote_addr;
+    socklen_t remote_addr_size = sizeof remote_addr;
 
     memset(buf, '\0', BUF_LEN);
     if (recvfrom(s, buf, BUF_LEN, 0, (struct sockaddr*)&remote_addr,
@@ -195,13 +172,10 @@ int recvd_hello(client_s * new_client) {
 }
 
 void close_connection() {
-    #ifdef _WIN32
     if (s)
         closesocket(s);
+    #ifdef _WIN32
     WSACleanup();
-    #else
-    if (s)
-        close(s);
     #endif
 }
 
