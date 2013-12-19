@@ -19,27 +19,33 @@ CFLAGS=-g -Wall -c -O0 -fms-extensions
 LDFLAGS=
 endif
 
+LDLIBS=
 ifeq "$(OS)" "Windows_NT" 
 LDLIBS=-lws2_32
-TARGETS=fountain.exe \
-		server.exe
-else
-LDLIBS=
-TARGETS=fountain \
-		server
 endif
 
+# Define a function for adding .exe
+ifeq "$(OS)" "Windows_NT"
+wino = $(1).exe
+else
+wino = $(1)
+endif
+
+TARGETS := fountain server
+TARGETS := $(foreach target,$(TARGETS),$(call wino,$(target)))
 
 all: $(TARGETS)
 
-fountain: main.o fountain.o errors.o
+$(call wino,fountain): main.o fountain.o errors.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-server: server.o fountain.o errors.o
+$(call wino,server): server.o fountain.o errors.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $<
+
+.PHONY: clean
 
 clean:
 	rm -f *.o $(TARGETS)
