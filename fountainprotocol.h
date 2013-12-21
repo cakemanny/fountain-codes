@@ -4,8 +4,6 @@
   fountainprotocol.h 
  
   This is where we define the message syntax for protocol.
-  The protocol is a connectioned protocol because this is designed to be
-  lightweight and efficient
 */
 
 
@@ -16,8 +14,8 @@
 
 //
 // Request for size of the file in the block size being used
-#define MSG_SIZE    "SIZEINBLOCKS"
-#define HDR_SIZE    "SIZEINBLOCKS "
+#define MSG_SIZE    "NUMBLOCKS"
+#define HDR_SIZE    "NUMBLOCKS "
 
 //
 // Request for the block size
@@ -38,7 +36,7 @@
 typedef struct file_info_s {
     int blk_size;
     int num_blocks;
-    char filename[255];
+    char filename[256];
 } file_info_s;
 
 #endif /* __FOUNTAINPROTOCOL_H__ */

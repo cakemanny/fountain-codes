@@ -56,7 +56,7 @@ static struct msg_lookup lookup_table[] =
     { 2, MSG_SIZE ENDL, NULL },
     { 3, MSG_BLKSIZE ENDL, NULL },
     { 4, MSG_FILENAME ENDL, send_filename },
-    { 5, MSG_INFO ENDL, NULL },
+    { 5, MSG_INFO ENDL, send_info },
     { 6, NULL, NULL}
 };
 
@@ -227,6 +227,29 @@ int send_filename(client_s client, const char * filename) {
         return ERR_MEM;
     send_std_msg(client, msg);
     free(msg); 
+    return 0;
+}
+
+int send_info(client_s client, const char * filename) {
+    file_info_s info = { .blk_size=blk_size };
+
+    FILE* f = fopen(filename, "r");
+    if (!f) return ERR_FOPEN;
+    fseek(f, 0, SEEK_END);
+    int filesize = ftell(f);
+
+    info.num_blocks = (filesize % blk_size)
+        ? (filesize /blk_size) + 1 : filesize / blk_size;
+
+    fclose(f);
+
+    strncpy(info.filename, filename, sizeof info.filename - 1);
+
+    int bytes_sent = sendto(s, (char*)&info, sizeof info, 0,
+            (struct sockaddr*)&client.address,
+            sizeof client.address);
+
+    if (bytes_sent == SOCKET_ERROR) return SOCKET_ERROR;
     return 0;
 }
 
