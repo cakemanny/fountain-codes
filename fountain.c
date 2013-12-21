@@ -1,3 +1,5 @@
+#define _GNU_SOURCE // asks stdio.h to include asprintf
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -358,6 +360,62 @@ cleanup:
     decodestate_free(state);
     handle_error(result, "__memory__fountain__");
     return NULL;
+}
+
+static int fountain_packet_size(fountain_s* ftn) {
+    return sizeof *ftn
+        + ftn->blk_size
+        + ftn->num_blocks * sizeof *ftn->block;
+}
+
+/* Serializes the sub-structures so that we can send it across the network
+ */
+buffer_s pack_fountain(fountain_s* ftn) {
+
+    int packet_size = fountain_packet_size(ftn);
+    void* packed_ftn = malloc(packet_size);
+    if (!packed_ftn) return (buffer_s){.length=0, .buffer=NULL};
+
+    memcpy(packed_ftn, ftn, sizeof *ftn);
+    memcpy(packed_ftn + sizeof *ftn, ftn->string, ftn->blk_size);
+    memcpy(packed_ftn + sizeof *ftn + ftn->blk_size,
+            ftn->block,
+            ftn->num_blocks * sizeof *ftn->block);
+
+    fountain_s* f_ptr = (fountain_s*) packed_ftn;
+    f_ptr->string = packed_ftn + sizeof *ftn;
+    f_ptr->block = packed_ftn + sizeof *ftn + ftn->blk_size;
+
+    return (buffer_s) {
+        .length = packet_size,
+        .buffer = packed_ftn
+    };
+}
+
+
+fountain_s* unpack_fountain(char const * packed_ftn) {
+    if (!packed_ftn) return NULL;
+
+    fountain_s* ftn = malloc(sizeof *ftn);
+    if (!ftn)  return NULL;
+    memcpy(ftn, packed_ftn, sizeof *ftn);
+
+    ftn->string = malloc(ftn->blk_size);
+    if (!ftn->string) goto free_fountain;
+    memcpy(ftn->string, packed_ftn + sizeof *ftn, ftn->blk_size);
+
+    ftn->block = malloc(ftn->num_blocks * sizeof *ftn->block);
+    if (!ftn->block) goto free_string;
+    memcpy(ftn->block, packed_ftn + sizeof *ftn + ftn->blk_size,
+            ftn->num_blocks * sizeof *ftn->block);
+
+    return ftn;
+free_string:
+    free(ftn->string);
+free_fountain:
+    free(ftn);
+    // should we have a more resilient handler / a kinder one...
+    return NULL; 
 }
 
 /* ============ Packhold Functions ========================================= */

@@ -16,29 +16,51 @@
 #include "errors.h"
 #include "fountain.h"
 #include "dbg.h"
+#include "fountainprotocol.h" // msg definitions
 
 #define LISTEN_PORT 2534
 #define LISTEN_IP "127.0.0.1"
-#define ENDL "\r\n"
+#define ENDL "\r\n" /* For network we always want to use CRLF */
 #define BUF_LEN 512
 #define BURST_SIZE 1000
 
-// === Types ===
+// ------ types ------
 typedef struct client_s {
     struct sockaddr_in address;
 } client_s;
 
-/* Forward declarations */
+
+// ------ Forward declarations ------
 static int create_connection(const char* ip_address);
 static int recvd_hello(client_s * new_client);
 static void close_connection();
 static int send_filename(client_s client, const char * filename);
 static int send_std_msg(client_s client, char const * msg);
-static int packet_size(fountain_s* ftn);
-static char* pack_fountain(fountain_s* ftn);
 static int send_fountain(client_s client, fountain_s* ftn);
 static int send_block_burst(client_s client, const char * filename);
 
+
+// Message lookup table
+typedef int (*msg_despatch_f)(client_s /* client */,
+                              const char * /* filename */);
+struct msg_lookup {
+    int id;
+    const char *msg;
+    msg_despatch_f despatcher;
+};
+
+static struct msg_lookup lookup_table[] =
+{
+    { 0, "" , NULL},
+    { 1, MSG_WAITING ENDL, send_block_burst },
+    { 2, MSG_SIZE ENDL, NULL },
+    { 3, MSG_BLKSIZE ENDL, NULL },
+    { 4, MSG_FILENAME ENDL, send_filename },
+    { 5, MSG_INFO ENDL, NULL },
+    { 6, NULL, NULL}
+};
+
+// ------ static variables ------
 static SOCKET s;
 #ifdef _WIN32
 static WSADATA w;
@@ -48,6 +70,8 @@ static char* listen_ip = LISTEN_IP;
 static char const * program_name;
 static int blk_size = 128; /* better to set this based on filesize */
 
+
+// ------ functions ------
 static void print_usage_and_exit(int status) {
     printf("Usage: %s [OPTION]... FILE\n", program_name);
     fputs("\
@@ -120,6 +144,9 @@ int main(int argc, char** argv) {
             if ((error = send_block_burst(client, filename)) < 0)
                 handle_error(error, &filename);
         }
+        else if (hello == 2) {
+            printf("Sending file info... " ENDL);
+        }
         // accept SIZEINBLOCKS request
         // accept BLOCKSIZE request
         // accept FILENAME request
@@ -154,6 +181,9 @@ int create_connection(const char* ip_address) {
     return 0;
 }
 
+//
+// Translate the message sent to us
+
 int recvd_hello(client_s * new_client) {
     char buf[BUF_LEN];
     struct sockaddr_in remote_addr;
@@ -163,11 +193,14 @@ int recvd_hello(client_s * new_client) {
     if (recvfrom(s, buf, BUF_LEN, 0, (struct sockaddr*)&remote_addr,
                 &remote_addr_size) < 0)
         return -1;
-    if (strcmp(buf, "FCWAITING" ENDL) == 0) {
-        new_client->address = remote_addr;
-        return 1;
-    }
 
+    // Lookup the message in the table
+    for (int i = 1; lookup_table[i].msg != NULL; i++) {
+        if (strcmp(buf, lookup_table[i].msg) == 0) {
+            new_client->address = remote_addr;
+            return i;
+        }
+    }
     return 0;
 }
 
@@ -190,48 +223,22 @@ int send_std_msg(client_s client, char const * msg) {
 
 int send_filename(client_s client, const char * filename) {
     char * msg;
-    if (asprintf(&msg, "FILENAME %s" ENDL, filename) < 0)
+    if (asprintf(&msg, HDR_FILENAME "%s" ENDL, filename) < 0)
         return ERR_MEM;
     send_std_msg(client, msg);
     free(msg); 
     return 0;
 }
 
-int packet_size(fountain_s* ftn) {
-    return sizeof *ftn
-            + ftn->blk_size
-            + ftn->num_blocks * sizeof *ftn->block;
-}
-
-/* Serializes the sub-structures so that we can send it across the network
- */
-char* pack_fountain(fountain_s* ftn) {
-
-    void* packed_ftn = malloc(packet_size(ftn));
-    if (!packed_ftn) return NULL;
-
-    memcpy(packed_ftn, ftn, sizeof *ftn);
-    memcpy(packed_ftn + sizeof *ftn, ftn->string, ftn->blk_size);
-    memcpy(packed_ftn + sizeof *ftn + ftn->blk_size,
-            ftn->block,
-            ftn->num_blocks * sizeof *ftn->block);
-
-    fountain_s* f_ptr = (fountain_s*) packed_ftn;
-    f_ptr->string = packed_ftn + sizeof *ftn;
-    f_ptr->block = packed_ftn + sizeof *ftn + ftn->blk_size;
-
-    return (char*) packed_ftn;
-}
-
 int send_fountain(client_s client, fountain_s* ftn) {
-    char* packet = pack_fountain(ftn);
-    if (packet == NULL) return ERR_PACKING;
+    buffer_s packet = pack_fountain(ftn);
+    if (packet.length == 0) return ERR_PACKING;
 
-    int bytes_sent = sendto(s, packet, packet_size(ftn), 0,
+    int bytes_sent = sendto(s, packet.buffer, packet.length, 0,
             (struct sockaddr*)&client.address,
             sizeof client.address);
 
-    free(packet);
+    free(packet.buffer);
 
     if (bytes_sent == SOCKET_ERROR) return SOCKET_ERROR;
     return 0;

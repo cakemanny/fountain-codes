@@ -32,7 +32,10 @@ typedef struct decodestate_s {
 } decodestate_s;
 
 typedef struct memdecodestate_s {
-    union { struct decodestate_s; decodestate_s state; };
+    union {
+        struct decodestate_s;
+        decodestate_s state;
+    };
     char * result;
 } memdecodestate_s;
 
@@ -55,12 +58,32 @@ char* decode_fountain(const char* string, int blk_size);
 #   define F_ALREADY_DECODED 1
 #endif
 int fdecode_fountain(decodestate_s* state, fountain_s* ftn);
+
 /* returns 0 on success
    returns ERR_MEM if mem allocation occurs for creating the pointed to
            elements.
  */
 int fountain_copy(fountain_s* dst, fountain_s* src); /* allocs memory */
 
+typedef struct buffer_s {
+    int length;
+    char* buffer;
+} buffer_s;
+
+/* Pack a fountain into a single buffer so that it can be sent across the
+   network. Works by placing each part one after the other in memory
+
+   returns A pointer to the buffer
+*/
+buffer_s pack_fountain(fountain_s* ftn);
+
+/* Upack the fountain from it's serialized form.
+   This does allocate memory because free_fountain will expect the inner
+   structures to be freeable
+
+   returns A pointer to the deserialized fountain or NULL on failure
+*/
+fountain_s* unpack_fountain(char const * packed_ftn);
 
 /* ============ packethold_s functions  ==================================== */
 packethold_s* packethold_new(); /* allocs memory */

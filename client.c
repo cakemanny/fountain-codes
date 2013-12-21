@@ -9,6 +9,7 @@
 #include "errors.h"
 #include "fountain.h"
 #include "dbg.h"
+#include "fountainprotocol.h" // msg definitions
 
 #define DEFAULT_PORT 2534
 #define DEFAULT_IP "127.0.0.1"
@@ -22,6 +23,10 @@ typedef fountain_s* (*fountain_src)(void);
 typedef struct server_s {
     struct sockaddr_in address;
 } server_s;
+
+// ------ Forward declarations ------
+static fountain_s* from_network();
+static char* get_remote_filename();
 
 // ------ static variables ------
 static SOCKET s = INVALID_SOCKET;
@@ -37,7 +42,12 @@ static int blk_size = 128;
 // ------ functions ------
 static void print_usage_and_exit(int status) {
     printf("Usage: %s [OPTION]... FILE\n", program_name);
-
+    fputs("\
+\n\
+  -i        ip address of the remote host\n\
+  -o        output file name\n\
+  -p        port to connect to\n\
+", stdout);
     exit(status);
 }
 
@@ -87,8 +97,11 @@ int main(int argc, char** argv) {
 
 int create_connection() {
 
+    #ifdef _WIN32
+    WSADATA w;
     if (WSAStartup(0x0202, &w)) return -10;
     if (w.wVersion != 0x0202)   return -20;
+    #endif
 
     s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (s == INVALID_SOCKET)    return -30;
@@ -99,7 +112,9 @@ int create_connection() {
 void close_connection() {
     if (s)
         closesocket(s);
+    #ifdef _WIN32
     WSACleanup();
+    #endif
 }
 
 static int send_msg(server_s server, char const * msg) {
@@ -109,39 +124,16 @@ static int send_msg(server_s server, char const * msg) {
     return 0;
 }
 
-// unpack the fountain... do we allocate new memory, yes because of free later
-// with inner structs
-static fountain_s* unpack_fountain(char const * packed_ftn) {
-    if (!packed_ftn) return NULL;
-
-    fountain_s* ftn = malloc(sizeof *ftn);
-    if (!ftn) return handle_error(ERR_MEM, NULL);
-    memcpy(ftn, packed_ftn, sizeof *ftn);
-
-    ftn->string = malloc(ftn->blk_size);
-    if (!ftn->string) goto free_fountain;
-    memcpy(ftn->string, packed_ftn + sizeof *ftn, ftn->blk_size);
-
-    ftn->block = malloc(ftn->num_blocks * sizeof *ftn->block);
-    if (!ftn-block) goto free_string;
-    memcpy(ftn->block, packed_ftn + sizeof *ftn + ftn->blk_size,
-            ftn->num_blocks * sizeof *ftn->block);
-
-    return ftn;
-free_string:
-    free(ftn->string);
-free_fountain:
-    free(ftn);
-    // should we have a more resilient handler / a kinder one...
-    return handle_error(ERR_MEM, NULL); 
+char* get_remote_filename() {
+    
 }
 
-static fountain_s* from_network() {
-    send_msg(curr_server, "FCWAITING" ENDL);
+fountain_s* from_network() {
+    send_msg(curr_server, MSG_WAITING ENDL);
 }
 
 static int nsize_in_blocks() {
-    send_msg(curr_server, "SIZEINBLOCKS" ENDL);
+    send_msg(curr_server, MSG_SIZE ENDL);
     //TODO set up a buffer to recv the size in
     
     char buf[BUF_LEN];
@@ -160,14 +152,14 @@ static int nsize_in_blocks() {
     } while (remote_addr != curr_server.address);
 
     int output = 0; // Shouldn't the following be 1+ rather than 1 -
-    if (memcmp(buf, "SIZEINBLOCKS ", 1 - sizeof "SIZEINBLOCKS ") == 0) {
+    if (memcmp(buf, HDR_SIZE, 1 + sizeof HDR_SIZE) == 0) {
         for (int i = 0; i < BUF_LEN - 1; i++) {
             if (buf[i] == '\r' && buf[i+1] == '\n') {
                 buf[i] = 0;
                 buf[i+1] = 0;
             }
         }
-        output = atoi(buf + sizeof "SIZEINBLOCKS ");
+        output = atoi(buf + sizeof HDR_SIZE);
     }
 
     //CONTINUE HERE
