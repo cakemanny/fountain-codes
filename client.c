@@ -1,8 +1,13 @@
 #define _GNU_SOURCE // asks stdio.h to include asprintf
+
+/* Load in OS specific networking code */
 #include "networking.h"
+
 #include <stdio.h>
 #include <stdlib.h> //memcpy
 #include <string.h>
+#include <unistd.h> //getopt
+
 #ifdef _WIN32
 #   include "asprintf.h"
 #endif
@@ -14,7 +19,7 @@
 #define DEFAULT_PORT 2534
 #define DEFAULT_IP "127.0.0.1"
 #define ENDL "\r\n"
-#define BUF_LEN 512
+#define BUF_LEN 512 // 4 times the blksize -- should be ok
 #define BURST_SIZE 1000
 
 // ------ types ------
@@ -24,7 +29,18 @@ typedef struct server_s {
     struct sockaddr_in address;
 } server_s;
 
+typedef struct ftn_cache_s {
+    int capacity;
+    int size;
+    fountain_s** base;
+    fountain_s** current;
+} ftn_cache_s;
+
+
 // ------ Forward declarations ------
+static int proc_file(fountain_src ftn_src);
+static int create_connection();
+static void close_connection();
 static fountain_s* from_network();
 static char* get_remote_filename();
 
@@ -76,7 +92,7 @@ int main(int argc, char** argv) {
     int error;
     if ( (error = create_connection()) < 0 ) {
         close_connection();
-        return handle_error(ERR_CONNECTION);
+        return handle_error(ERR_CONNECTION, NULL);
     }
 
     server_s server = { .address={
@@ -86,12 +102,17 @@ int main(int argc, char** argv) {
     } };
     curr_server = server;
 
-    //TODO
-    if (!outfilename) outfilename = get_remote_filename();
+    int i_should_free_outfilename = 0;
+    if (!outfilename) {
+        outfilename = get_remote_filename();
+        i_should_free_outfilename = 1;
+    }
 
     // do { get some packets, try to decode } while ( not decoded )
     proc_file(from_network);
 
+    if (i_should_free_outfilename)
+        free(outfilename);
     close_connection();
 }
 
@@ -118,27 +139,15 @@ void close_connection() {
 }
 
 static int send_msg(server_s server, char const * msg) {
+    debug("About to send msg: %s", msg);
     sendto(s, msg, strlen(msg), 0,
             (struct sockaddr*)&server.address,
             sizeof server.address); //FIXME - check return code
     return 0;
 }
 
-char* get_remote_filename() {
-    
-}
-
-fountain_s* from_network() {
-    send_msg(curr_server, MSG_WAITING ENDL);
-}
-
-static int nsize_in_blocks() {
-    send_msg(curr_server, MSG_SIZE ENDL);
-    //TODO set up a buffer to recv the size in
-    
-    char buf[BUF_LEN];
+static int recv_msg(char buf[], size_t buf_len) {
     int bytes_recvd = 0;
-
     struct sockaddr_in remote_addr;
     int remote_addr_size = sizeof remote_addr;
 
@@ -149,31 +158,99 @@ static int nsize_in_blocks() {
                         &remote_addr_size);
         if (bytes_recvd < 0)
             return ERR_NETWORK;
-    } while (remote_addr != curr_server.address);
 
-    int output = 0; // Shouldn't the following be 1+ rather than 1 -
-    if (memcmp(buf, HDR_SIZE, 1 + sizeof HDR_SIZE) == 0) {
-        for (int i = 0; i < BUF_LEN - 1; i++) {
-            if (buf[i] == '\r' && buf[i+1] == '\n') {
-                buf[i] = 0;
-                buf[i+1] = 0;
-            }
-        }
-        output = atoi(buf + sizeof HDR_SIZE);
+        // I'll surely be told off for this...
+    } while (memcmp((void*)&remote_addr,
+                (void*)&curr_server.address, sizeof remote_addr) != 0);
+    return bytes_recvd;
+}
+
+char* get_remote_filename() {
+    send_msg(curr_server, MSG_FILENAME);
+    char buf[BUF_LEN];
+    int bytes_recvd = recv_msg(&buf, BUF_LEN);
+    if (bytes_recvd < 0) return NULL;
+    if (memcmp(buf, HDR_FILENAME, sizeof HDR_FILENAME -1) == 0) {
+        char * tmp;
+        if (asprintf(&tmp, "%s", buf + sizeof HDR_FILENAME) < 0)
+            return NULL;
+        return tmp; // this will get free'd in main
+    }
+    // Should really consider doing a few retries at this point
+    return NULL;
+}
+
+static void ftn_cache_alloc(ftn_cache_s* cache) {
+    cache->base = malloc(BURST_SIZE * sizeof *cache->base);
+    if (cache->base == NULL) return;
+
+    cache->capacity = BURST_SIZE;
+    cache->current = cache->base;
+}
+
+static void load_from_network(ftn_cache_s* cache) {
+    send_msg(curr_server, MSG_WAITING ENDL);
+    
+    char buf[BUF_LEN];
+    // we need to do these either 750 times or... have a timeout
+    // we might also want to adjust our yield expectation depending
+    // on whether we are hitting those timeouts or not...
+    int bytes_recvd = recv_msg(&buf, BUF_LEN);
+    if (bytes_recvd < 0)
+        handle_error(bytes_recvd, NULL);
+
+    // DEBUG
+    printf("%s", buf);
+}
+
+fountain_s* from_network() {
+    static ftn_cache_s cache = {};
+    if (cache.base == NULL) {
+        ftn_cache_alloc(&cache);
+        if (cache.base == NULL) return NULL;
     }
 
+    if (cache.size == 0) {
+        debug("Cache size 0 - loading from network...");
+        load_from_network(&cache);
+        if (cache.size == 0) return NULL;
+    }
+
+    fountain_s* output = *cache.current;
+    *cache.current++ = NULL;
+    --cache.size;
+    return output;
+}
+
+static int nsize_in_blocks() {
+    send_msg(curr_server, MSG_SIZE ENDL);
+    
+    char buf[BUF_LEN];
+    int bytes_recvd = recv_msg(&buf, BUF_LEN);
+
+    int output = 0;
+    if (memcmp(buf, HDR_SIZE, sizeof HDR_SIZE - 1) == 0) {
+        debug("Message received: %s", buf);
+        output = atoi(buf + sizeof HDR_SIZE - 1);
+        debug("Filesize in blocks: %d", output);
+        return output;
+    }
+    // Really we ought to try again until we get te msg we want
+    return -1; // given it an error code I guess...guess
     //CONTINUE HERE
 }
 
 /* process fountains as they come down the wire
    returns a status code (see errors.c)
  */
-static int proc_file(fountain_src ftn_src) {
+int proc_file(fountain_src ftn_src) {
     int result = 0;
     char * err_str = NULL;
 
     // prepare to do some output
     int num_blocks = nsize_in_blocks();
+    if (num_blocks < 0)
+        return handle_error(num_blocks, err_str);
 
     decodestate_s* state = decodestate_new(blk_size, num_blocks);
     if (!state) return handle_error(ERR_MEM, NULL);

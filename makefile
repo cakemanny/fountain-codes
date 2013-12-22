@@ -31,7 +31,7 @@ else
 wino = $(1)
 endif
 
-TARGETS := fountain server
+TARGETS := fountain server client
 TARGETS := $(foreach target,$(TARGETS),$(call wino,$(target)))
 
 all: $(TARGETS)
@@ -40,6 +40,9 @@ $(call wino,fountain): main.o fountain.o errors.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 $(call wino,server): server.o fountain.o errors.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
+$(call wino,client): client.o fountain.o errors.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 %.o: %.c

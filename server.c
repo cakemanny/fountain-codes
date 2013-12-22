@@ -38,6 +38,9 @@ static int send_filename(client_s client, const char * filename);
 static int send_std_msg(client_s client, char const * msg);
 static int send_fountain(client_s client, fountain_s* ftn);
 static int send_block_burst(client_s client, const char * filename);
+static int send_info(client_s client, const char * filename);
+static int send_size(client_s client, const char * filename);
+static int send_blk_size(client_s client, const char * filename);
 
 
 // Message lookup table
@@ -53,8 +56,8 @@ static struct msg_lookup lookup_table[] =
 {
     { 0, "" , NULL},
     { 1, MSG_WAITING ENDL, send_block_burst },
-    { 2, MSG_SIZE ENDL, NULL },
-    { 3, MSG_BLKSIZE ENDL, NULL },
+    { 2, MSG_SIZE ENDL, send_size },
+    { 3, MSG_BLKSIZE ENDL, send_blk_size },
     { 4, MSG_FILENAME ENDL, send_filename },
     { 5, MSG_INFO ENDL, send_info },
     { 6, NULL, NULL}
@@ -133,23 +136,15 @@ int main(int argc, char** argv) {
 
     int hello;
     while ((hello = recvd_hello(&client)) >= 0) {
-        if (hello == 1) {
-            printf("Received connection..." ENDL);
-            /* == do some file transfering ==
-             * send file signature
-             * while !recv'd finished: send block
-            */
-            if ((error = send_filename(client, filename)) < 0)
+        if (hello) {
+            odebug("%d", hello);
+            debug("About to despatch for %s", lookup_table[hello].msg);
+            if ((error = lookup_table[hello].despatcher(client, filename)) < 0)
                 handle_error(error, NULL);
-            if ((error = send_block_burst(client, filename)) < 0)
-                handle_error(error, &filename);
+        } else {
+            log_info("Unknown msg code: %d", hello);
         }
-        else if (hello == 2) {
-            printf("Sending file info... " ENDL);
-        }
-        // accept SIZEINBLOCKS request
-        // accept BLOCKSIZE request
-        // accept FILENAME request
+        // TODO accept BLOCKSIZE request
     }
 
     close_connection();
@@ -194,6 +189,8 @@ int recvd_hello(client_s * new_client) {
                 &remote_addr_size) < 0)
         return -1;
 
+    debug("Received msg: %s", buf);
+
     // Lookup the message in the table
     for (int i = 1; lookup_table[i].msg != NULL; i++) {
         if (strcmp(buf, lookup_table[i].msg) == 0) {
@@ -222,6 +219,7 @@ int send_std_msg(client_s client, char const * msg) {
 }
 
 int send_filename(client_s client, const char * filename) {
+    debug("Sending filename: %s", filename);
     char * msg;
     if (asprintf(&msg, HDR_FILENAME "%s" ENDL, filename) < 0)
         return ERR_MEM;
@@ -230,21 +228,49 @@ int send_filename(client_s client, const char * filename) {
     return 0;
 }
 
-int send_info(client_s client, const char * filename) {
-    file_info_s info = { .blk_size=blk_size };
-
+static int fsize (const char * filename) {
     FILE* f = fopen(filename, "r");
     if (!f) return ERR_FOPEN;
     fseek(f, 0, SEEK_END);
     int filesize = ftell(f);
 
-    info.num_blocks = (filesize % blk_size)
+    int result = (filesize % blk_size)
         ? (filesize /blk_size) + 1 : filesize / blk_size;
-
     fclose(f);
+    return result;
+}
+
+int send_size(client_s client, const char * filename) {
+    char * msg;
+    int size = fsize(filename);
+    debug("Sending size: %d", size);
+    if (asprintf(&msg, HDR_SIZE "%d" ENDL, size) < 0)
+        return ERR_MEM;
+    send_std_msg(client, msg);
+    free(msg);
+    return 0;
+}
+
+int send_blk_size(client_s client, const char * filename) {
+    char * msg;
+    debug("Sending blk_size: %d", blk_size);
+    if (asprintf(&msg, HDR_BLKSIZE "%d" ENDL, blk_size) < 0)
+        return ERR_MEM;
+    send_std_msg(client, msg);
+    free(msg);
+    return 0;
+}
+
+int send_info(client_s client, const char * filename) {
+    debug("Sending infor for file %s", filename);
+    file_info_s info = { .blk_size=blk_size };
+
+    info.num_blocks = fsize(filename);
 
     strncpy(info.filename, filename, sizeof info.filename - 1);
 
+    odebug("%d", info.blk_size);
+    odebug("%d", info.num_blocks);
     int bytes_sent = sendto(s, (char*)&info, sizeof info, 0,
             (struct sockaddr*)&client.address,
             sizeof client.address);
