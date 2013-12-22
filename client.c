@@ -146,12 +146,14 @@ static int send_msg(server_s server, char const * msg) {
     return 0;
 }
 
-static int recv_msg(char buf[], size_t buf_len) {
+static int recv_msg(char* buf, size_t buf_len) {
     int bytes_recvd = 0;
     struct sockaddr_in remote_addr;
-    int remote_addr_size = sizeof remote_addr;
+    socklen_t remote_addr_size = sizeof remote_addr;
 
     do {
+        debug("Clearing buffer and waiting for reponse from %s",
+                inet_ntoa(curr_server.address.sin_addr));
         memset(buf, '\0', BUF_LEN);
         bytes_recvd = recvfrom(s, buf, BUF_LEN, 0,
                         (struct sockaddr*)&remote_addr,
@@ -159,16 +161,22 @@ static int recv_msg(char buf[], size_t buf_len) {
         if (bytes_recvd < 0)
             return ERR_NETWORK;
 
-        // I'll surely be told off for this...
-    } while (memcmp((void*)&remote_addr,
-                (void*)&curr_server.address, sizeof remote_addr) != 0);
+        debug("Received %d bytes from %s",
+                bytes_recvd, inet_ntoa(remote_addr.sin_addr));
+
+        /* Make sure that this is from the server we made the request to,
+           otherwise ignore and try again */
+    } while (memcmp((void*)&remote_addr.sin_addr,
+                (void*)&curr_server.address.sin_addr,
+                sizeof remote_addr.sin_addr) != 0);
+
     return bytes_recvd;
 }
 
 char* get_remote_filename() {
-    send_msg(curr_server, MSG_FILENAME);
+    send_msg(curr_server, MSG_FILENAME ENDL);
     char buf[BUF_LEN];
-    int bytes_recvd = recv_msg(&buf, BUF_LEN);
+    int bytes_recvd = recv_msg(buf, BUF_LEN);
     if (bytes_recvd < 0) return NULL;
     if (memcmp(buf, HDR_FILENAME, sizeof HDR_FILENAME -1) == 0) {
         char * tmp;
@@ -192,15 +200,21 @@ static void load_from_network(ftn_cache_s* cache) {
     send_msg(curr_server, MSG_WAITING ENDL);
     
     char buf[BUF_LEN];
+
+
     // we need to do these either 750 times or... have a timeout
     // we might also want to adjust our yield expectation depending
     // on whether we are hitting those timeouts or not...
-    int bytes_recvd = recv_msg(&buf, BUF_LEN);
-    if (bytes_recvd < 0)
-        handle_error(bytes_recvd, NULL);
+    for (int i = 0; i < 200; i++) {
+        int bytes_recvd = recv_msg(buf, BUF_LEN);
+        if (bytes_recvd < 0)
+            handle_error(bytes_recvd, NULL);
 
-    // DEBUG
-    printf("%s", buf);
+        cache->base[i] = unpack_fountain(buf);
+        cache->size++;
+        debug("Cache size is now %d", cache->size);
+    }
+    cache->current = cache->base;
 }
 
 fountain_s* from_network() {
@@ -226,7 +240,8 @@ static int nsize_in_blocks() {
     send_msg(curr_server, MSG_SIZE ENDL);
     
     char buf[BUF_LEN];
-    int bytes_recvd = recv_msg(&buf, BUF_LEN);
+    int bytes_recvd = recv_msg(buf, BUF_LEN);
+    if (bytes_recvd < 0) return ERR_NETWORK;
 
     int output = 0;
     if (memcmp(buf, HDR_SIZE, sizeof HDR_SIZE - 1) == 0) {
