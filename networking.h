@@ -1,3 +1,5 @@
+#ifndef __NETWORKING_H__
+#define __NETWORKING_H__
 
 /* Load in the correct networking libraries for the OS */
 #ifdef _WIN32
@@ -29,4 +31,4 @@
 #   define INVALID_SOCKET -1
 #endif
 
-
+#endif /* __NETWORKING_H__ */

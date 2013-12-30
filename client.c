@@ -210,7 +210,21 @@ static void load_from_network(ftn_cache_s* cache) {
         if (bytes_recvd < 0)
             handle_error(bytes_recvd, NULL);
 
-        cache->base[i] = unpack_fountain(buf);
+        buffer_s packet = {
+            .length = bytes_recvd,
+            .buffer = buf
+        };
+        fountain_s* ftn = unpack_fountain(packet);
+        if (ftn == NULL) { // Checksum may have failed
+            // If the system runs out of memory this may become an infinite
+            // loop... we could create an int offset instead of using
+            // i, but that may end the program if we get too many bad packets.
+            // Both are unlikely. May have to consider using some sort of
+            // error code instead
+            --i;
+            continue;
+        }
+        cache->base[i] = ftn;
         cache->size++;
         debug("Cache size is now %d", cache->size);
     }

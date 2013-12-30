@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
+#include <stdint.h>
 #include "errors.h"
 #include "fountain.h"
 #include "dbg.h"
@@ -362,8 +363,23 @@ cleanup:
     return NULL;
 }
 
+/* Copied not quite verbatim from wikipedia.
+   Used to check that network packets are intact
+ */
+static uint16_t Fletcher16(uint8_t const * data, int count)
+{
+    uint16_t sum1 = 0;
+    uint16_t sum2 = 0;
+    for (int i = 0; i < count; ++i) {
+        sum1 = (sum1 + data[i]) % 255;
+        sum2 = (sum2 + sum1) % 255;
+    }
+    return (sum2 << 8) | sum1;
+}
+
 static int fountain_packet_size(fountain_s* ftn) {
-    return sizeof *ftn
+    return sizeof(uint16_t) // Make space for the checksum
+        + sizeof *ftn
         + ftn->blk_size
         + ftn->num_blocks * sizeof *ftn->block;
 }
@@ -373,8 +389,13 @@ static int fountain_packet_size(fountain_s* ftn) {
 buffer_s pack_fountain(fountain_s* ftn) {
 
     int packet_size = fountain_packet_size(ftn);
-    void* packed_ftn = malloc(packet_size);
-    if (!packed_ftn) return (buffer_s){.length=0, .buffer=NULL};
+    void* buf_start = malloc(packet_size);
+    if (!buf_start) return (buffer_s){.length=0, .buffer=NULL};
+
+    uint16_t checksum = 0;
+
+    // reference the memory after the checksum for convenience
+    void* packed_ftn = buf_start + sizeof checksum;
 
     memcpy(packed_ftn, ftn, sizeof *ftn);
     memcpy(packed_ftn + sizeof *ftn, ftn->string, ftn->blk_size);
@@ -386,19 +407,36 @@ buffer_s pack_fountain(fountain_s* ftn) {
     f_ptr->string = packed_ftn + sizeof *ftn;
     f_ptr->block = packed_ftn + sizeof *ftn + ftn->blk_size;
 
+    // now we can calculate and fill in the hole at the beginning
+    checksum = Fletcher16(packed_ftn, packet_size - sizeof checksum);
+    memcpy(buf_start, &checksum, sizeof checksum);
+
     return (buffer_s) {
         .length = packet_size,
-        .buffer = packed_ftn
+        .buffer = buf_start
     };
 }
 
 
-fountain_s* unpack_fountain(char const * packed_ftn) {
-    if (!packed_ftn) return NULL;
+fountain_s* unpack_fountain(buffer_s packet) {
+    if (!packet.buffer) return NULL;
+
+    uint16_t checksum = *((uint16_t*)packet.buffer);
+// place the pointer passed the checksum to make the rest of the code in this
+// function a tad more readble
+    char const * packed_ftn = packet.buffer + sizeof checksum;
+
+// because our fountain packet can be of variable size we had to wait until
+// this point before we were able to calculate the checksum
+    int calculated = Fletcher16((uint8_t*)packed_ftn, packet.length - sizeof checksum);
+    odebug("%d", checksum);
+    odebug("%d", calculated);
+    if (checksum != calculated) return NULL;
 
     fountain_s* ftn = malloc(sizeof *ftn);
     if (!ftn)  return NULL;
     memcpy(ftn, packed_ftn, sizeof *ftn);
+
 
     ftn->string = malloc(ftn->blk_size);
     if (!ftn->string) goto free_fountain;

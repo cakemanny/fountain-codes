@@ -14,10 +14,10 @@ Since last updating this text, the following have been completed
 * Working version on unix based systems (as much as you consider it 'working')
 * Client and server network pair
 * Added license
+* Checksumming on network packets
 
 To be resolved:
 
-* No checksumming on receipt
 * NULL's up to the length of a blocksize are appended to the end of the output
 * Misalignement of blocks when serving from windows
 * segfault when 32-bit linux serves to 64-bit mac (program rather than OS)

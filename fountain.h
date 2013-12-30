@@ -83,7 +83,7 @@ buffer_s pack_fountain(fountain_s* ftn);
 
    returns A pointer to the deserialized fountain or NULL on failure
 */
-fountain_s* unpack_fountain(char const * packed_ftn);
+fountain_s* unpack_fountain(buffer_s packet);
 
 /* ============ packethold_s functions  ==================================== */
 packethold_s* packethold_new(); /* allocs memory */
