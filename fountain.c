@@ -28,21 +28,28 @@ static int size_in_blocks(const char* string, int blk_size) {
 }
 
 static int choose_num_blocks(const int n) {
-    const int d_size = n*(n+1)/2;
-    int* dist = malloc(d_size * sizeof *dist);
-    if (!dist) return 1; /* We ran out of memory, should probs die, but
-                          * maybe we can squeeze out one more block */
+    static int* dist = NULL;
+    static int dist_n = 0;
 
-    int* lpdist = dist;
-    for (int m = n; m > 0; m--) {
-        for (int i = 0; i < m; i++) {
-            *lpdist++ = n - m + 1;
+    const int d_size = n*(n+1)/2;
+    if (dist_n != n) {
+        if (dist) free(dist); /* assumption broken, free cache */
+        dist = malloc(d_size * sizeof *dist);
+        if (!dist) return 1; /* We ran out of memory, should probs die, but
+                            * maybe we can squeeze out one more block */
+
+        int* lpdist = dist;
+        for (int m = n; m > 0; m--) {
+            for (int i = 0; i < m; i++) {
+                *lpdist++ = n - m + 1;
+            }
         }
+        dist_n = n;
     }
 
     int d = dist[rand() % d_size];
 
-    free(dist);
+    /* see how we don't free dist... */
     return d;
 }
 
@@ -83,6 +90,7 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
     if (select_blocks(n, output) < 0) goto free_ftn;
 
     // XOR blocks together
+    // Why blk_size + 1? we are no longer terminate with NULL
     output->string = calloc(blk_size + 1, sizeof *output->string);
     if (!output->string) goto free_ob;
 
@@ -198,80 +206,84 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
     packethold_s* hold = state->hold;
     int blk_size = state->blk_size;
 
-    // Case one, block size one
-    if (ftn->num_blocks == 1) {
-        if (blkdec[ftn->block[0]] == 0) {
-            if (bwrite(ftn->string, ftn->block[0], state) != 1)
-                return ERR_BWRITE;
-            blkdec[ftn->block[0]] = 1;
-        } else { /* block already decoded */
-            return F_ALREADY_DECODED;
-        }
+    do {
+        retest = false;
+        // Case one, block size one
+        if (ftn->num_blocks == 1) {
+            if (blkdec[ftn->block[0]] == 0) {
+                if (bwrite(ftn->string, ftn->block[0], state) != 1)
+                    return ERR_BWRITE;
+                blkdec[ftn->block[0]] = 1;
+            } else { /* block already decoded */
+                return F_ALREADY_DECODED;
+            }
 
-        // Part two check against blocks in hold
-        bool match = false;
-        for (int i = 0; i < hold->num_packets; i++) {
-            for(int j = 0; j < hold->fountain[i].num_blocks; j++) {
-                if (hold->fountain[i].block[j] == ftn->block[0]) {
-                    // Xor out the hold block
-                    xorncpy(hold->fountain[i].string, ftn->string, blk_size);
+            // Part two check against blocks in hold
+            bool match = false;
+            for (int i = 0; i < hold->num_packets; i++) {
+                for(int j = 0; j < hold->fountain[i].num_blocks; j++) {
+                    if (hold->fountain[i].block[j] == ftn->block[0]) {
+                        // Xor out the hold block
+                        xorncpy(hold->fountain[i].string, ftn->string, blk_size);
 
-                    // Remove removed blk number
-                    for (int k = i; k < hold->fountain[i].num_blocks-1; k++) {
-                        hold->fountain[i].block[k] =
-                            hold->fountain[i].block[k+1];
+                        // Remove removed blk number
+                        for (int k = i; k < hold->fountain[i].num_blocks-1; k++) {
+                            hold->fountain[i].block[k] =
+                                hold->fountain[i].block[k+1];
+                        }
+                        int k = hold->fountain[i].num_blocks - 1;
+                        hold->fountain[i].block[k] = 0;
+                        hold->fountain[i].num_blocks--;
+                        match = true;
+                        break;
                     }
-                    int k = hold->fountain[i].num_blocks - 1;
-                    hold->fountain[i].block[k] = 0;
-                    hold->fountain[i].num_blocks--;
-                    match = true;
+                }
+                if (!match) continue;
+                // On success check if hold packet is of size one block
+                if (hold->fountain[i].num_blocks == 1) {
+                    // move into output if we don't already have it
+                    fountain_s* tmp_ftn = packethold_remove(hold, i);
+                    if (!tmp_ftn) return ERR_MEM;
+                    if (blkdec[tmp_ftn->block[0]] == 0) { /* not yet decoded so
+                                                            write to file */
+                        if (bwrite(tmp_ftn->string,
+                                tmp_ftn->block[0],
+                                state) != 1) {
+                            free_fountain(tmp_ftn);
+                            return ERR_BWRITE;
+                        }
+                        blkdec[tmp_ftn->block[0]] = 1;
+                    }
+                    free_fountain(tmp_ftn);
+                }
+            }
+        } else { /* size > 1, check against unsolved blocks */
+            for (int i = 0; i < ftn->num_blocks; i++) {
+                if (blkdec[ftn->block[i]]) {
+                    // Xor the decoded block out of a new packet
+                    char buf[blk_size];
+                    memset(buf, 0, blk_size);
+                    bread(buf, ftn->block[i], state);
+                    xorncpy(ftn->string, buf, blk_size);
+
+                    // Remove the decoded block number
+                    for (int j = i; j < ftn->num_blocks - 1; j++) {
+                        ftn->block[j] = ftn->block[j+1];
+                    }
+                    ftn->block[ftn->num_blocks - 1] = 0; 
+
+                    // reduce number of blocks held
+                    ftn->num_blocks--;
+
+                    // retest current reduced packet
+                    retest = true;
                     break;
                 }
             }
-            if (!match) continue;
-            // On success check if hold packet is of size one block
-            if (hold->fountain[i].num_blocks == 1) {
-                // move into output if we don't already have it
-                fountain_s* tmp_ftn = packethold_remove(hold, i);
-                if (!tmp_ftn) return ERR_MEM;
-                if (blkdec[tmp_ftn->block[0]] == 0) { /* not yet decoded so
-                                                         write to file */
-                    if (bwrite(tmp_ftn->string,
-                            tmp_ftn->block[0],
-                            state) != 1) {
-                        free_fountain(tmp_ftn);
-                        return ERR_BWRITE;
-                    }
-                    blkdec[tmp_ftn->block[0]] = 1;
-                }
-                free_fountain(tmp_ftn);
-            }
+
         }
-    } else { /* size > 1, check against unsolved blocks */
-        for (int i = 0; i < ftn->num_blocks; i++) {
-            if (blkdec[ftn->block[i]]) {
-                // Xor the decoded block out of a new packet
-                char buf[blk_size];
-                memset(buf, 0, blk_size);
-                bread(buf, ftn->block[i], state);
-                xorncpy(ftn->string, buf, blk_size);
-
-                // Remove the decoded block number
-                for (int j = i; j < ftn->num_blocks - 1; j++) {
-                    ftn->block[j] = ftn->block[j+1];
-                }
-                ftn->block[ftn->num_blocks - 1] = 0; 
-
-                // reduce number of blocks held
-                ftn->num_blocks--;
-
-                // retest current reduced packet
-                retest = true;
-                break;
-            }
-        }
-        if (retest) return _decode_fountain(state, ftn, bread, bwrite);
-
+    } while (retest);
+    if (ftn->num_blocks != 1) {
         bool inhold = false;
         for (size_t i = 0; i < hold->offset; i++) {
             if (cmp_fountain(ftn, hold->fountain + i) == 0) {
@@ -284,7 +296,6 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                 return handle_error(ERR_PACKET_ADD, NULL);
         }
     }
-
     return 0;
 }
 
@@ -336,7 +347,7 @@ char* decode_fountain(const char* string, int blk_size) {
     if (tmp_ptr) state = tmp_ptr; else goto cleanup;
 
     //char* output = calloc(strlen(string) + 1, 1);
-    char* output = calloc(size_in_blocks(string, blk_size), blk_size);
+    char* output = calloc(num_blocks, blk_size);
     if (!output) goto cleanup;
 
     ((memdecodestate_s*)state)->result = output;
@@ -516,7 +527,7 @@ fountain_s* packethold_remove(packethold_s* hold, int pos) {
 
 int packethold_add(packethold_s* hold, fountain_s* ftn) {
     if (hold->offset >= hold->num_slots) {
-        int space = 3 * hold->num_slots /2;
+        int space = hold->num_slots + (hold->num_slots >> 1);
         odebug("%d", space);
 
         fountain_s* tmp_ptr = hold->fountain;

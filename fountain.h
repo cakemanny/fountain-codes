@@ -16,7 +16,7 @@ typedef struct fountain_s {
 typedef struct packethold_s {
     int num_packets;
     int num_slots;
-    fountain_s * fountain;
+    fountain_s * fountain; /* an array of held packets */
     size_t offset;
 } packethold_s;
 

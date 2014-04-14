@@ -102,13 +102,16 @@ free_state:
 /* Program entry point */
 int main(int argc, char** argv) {
     int c;
-    while ( (c = getopt(argc, argv, "f:o:")) != -1) {
+    while ( (c = getopt(argc, argv, "f:o:b:")) != -1) {
         switch (c) {
             case 'f':
                 infilename = optarg;
                 break;
             case 'o':
                 outfilename = optarg;
+                break;
+            case 'b':
+                blk_size = atoi(optarg);
                 break;
         }
     }
