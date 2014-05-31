@@ -270,7 +270,7 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                     for (int j = i; j < ftn->num_blocks - 1; j++) {
                         ftn->block[j] = ftn->block[j+1];
                     }
-                    ftn->block[ftn->num_blocks - 1] = 0; 
+                    ftn->block[ftn->num_blocks - 1] = 0;
 
                     // reduce number of blocks held
                     ftn->num_blocks--;
@@ -464,7 +464,7 @@ free_string:
 free_fountain:
     free(ftn);
     // should we have a more resilient handler / a kinder one...
-    return NULL; 
+    return NULL;
 }
 
 /* ============ Packhold Functions ========================================= */
@@ -536,10 +536,10 @@ int packethold_add(packethold_s* hold, fountain_s* ftn) {
             hold->fountain = tmp_ptr;
             return REALLOC_ERR;
         }
-        
+
         hold->num_slots = space;
     }
-    
+
     if (fountain_copy(&hold->fountain[hold->offset++], ftn) < 0)
         return ERR_MEM;
     hold->num_packets++;
@@ -549,7 +549,7 @@ int packethold_add(packethold_s* hold, fountain_s* ftn) {
 /* ============ Decode state Functions ===================================== */
 
 /* State struct like
-  
+
    int blk_size
    int num_blocks
    int* blkdecoded

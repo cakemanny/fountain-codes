@@ -7,6 +7,7 @@
 #include <stdlib.h> //memcpy
 #include <string.h>
 #include <unistd.h> //getopt
+#include <getopt.h> //getopt_long
 
 #ifdef _WIN32
 #   include "asprintf.h"
@@ -44,6 +45,15 @@ static void close_connection();
 static fountain_s* from_network();
 static char* get_remote_filename();
 
+// TODO: test use of long options on windows
+struct option long_options[] = {
+    { "help",   no_argument,        NULL, 'h' },
+    { "ip",     required_argument,  NULL, 'i' },
+    { "output", required_argument,  NULL, 'o' },
+    { "port",   required_argument,  NULL, 'p' },
+    { 0, 0, 0, 0 }
+};
+
 // ------ static variables ------
 static SOCKET s = INVALID_SOCKET;
 static int port = DEFAULT_PORT;
@@ -57,13 +67,16 @@ static int blk_size = 128;
 
 // ------ functions ------
 static void print_usage_and_exit(int status) {
-    printf("Usage: %s [OPTION]... FILE\n", program_name);
+    FILE* out = (status == 0) ? stdout : stderr;
+
+    fprintf(out, "Usage: %s [OPTION]... FILE\n", program_name);
     fputs("\
 \n\
-  -i        ip address of the remote host\n\
-  -o        output file name\n\
-  -p        port to connect to\n\
-", stdout);
+  -h, --help                display this help message\n\
+  -i, --ip=IPADDRESS        ip address of the remote host\n\
+  -o, --output=FILENAME     output file name\n\
+  -p, --port=PORT           port to connect to\n\
+", out);
     exit(status);
 }
 
@@ -71,8 +84,11 @@ int main(int argc, char** argv) {
     /* deal with options */
     program_name = argv[0];
     int c;
-    while ( (c = getopt(argc, argv, "i:o:p:")) != -1 ) {
+    while ( (c = getopt_long(argc, argv, "i:o:p:", long_options, NULL)) != -1 ) {
         switch (c) {
+            case 'h':
+                print_usage_and_exit(0);
+                break;
             case 'i':
                 remote_addr = optarg;
                 break;
@@ -83,7 +99,10 @@ int main(int argc, char** argv) {
                 port = atoi(optarg);
                 break;
             case '?':
-                fprintf(stderr, "bad option %c\n", optopt);
+                print_usage_and_exit(1);
+                break;
+            default: // Shouldn't happen
+                fprintf(stderr, "bad option: %c\n", optopt);
                 print_usage_and_exit(1);
                 break;
         }
@@ -198,7 +217,7 @@ static void ftn_cache_alloc(ftn_cache_s* cache) {
 
 static void load_from_network(ftn_cache_s* cache) {
     send_msg(curr_server, MSG_WAITING ENDL);
-    
+
     char buf[BUF_LEN];
 
 
@@ -252,7 +271,7 @@ fountain_s* from_network() {
 
 static int nsize_in_blocks() {
     send_msg(curr_server, MSG_SIZE ENDL);
-    
+
     char buf[BUF_LEN];
     int bytes_recvd = recv_msg(buf, BUF_LEN);
     if (bytes_recvd < 0) return ERR_NETWORK;

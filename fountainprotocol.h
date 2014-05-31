@@ -1,8 +1,8 @@
-#ifndef __FOUNTAINPROTOCOL_H__ 
+#ifndef __FOUNTAINPROTOCOL_H__
 #define __FOUNTAINPROTOCOL_H__
 /*
-  fountainprotocol.h 
- 
+  fountainprotocol.h
+
   This is where we define the message syntax for protocol.
 */
 

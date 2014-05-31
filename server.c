@@ -8,6 +8,7 @@
 #include <string.h>
 #include <time.h> //time
 #include <unistd.h> //getopt
+#include <getopt.h> //getopt_long
 
 /* Windows doesn't seem to provide asprintf.h... */
 #ifdef _WIN32
@@ -54,13 +55,22 @@ struct msg_lookup {
 
 static struct msg_lookup lookup_table[] =
 {
-    { 0, "" , NULL},
-    { 1, MSG_WAITING ENDL, send_block_burst },
-    { 2, MSG_SIZE ENDL, send_size },
-    { 3, MSG_BLKSIZE ENDL, send_blk_size },
-    { 4, MSG_FILENAME ENDL, send_filename },
-    { 5, MSG_INFO ENDL, send_info },
-    { 6, NULL, NULL}
+    { 0, "" ,               NULL                },
+    { 1, MSG_WAITING ENDL,  send_block_burst    },
+    { 2, MSG_SIZE ENDL,     send_size           },
+    { 3, MSG_BLKSIZE ENDL,  send_blk_size       },
+    { 4, MSG_FILENAME ENDL, send_filename       },
+    { 5, MSG_INFO ENDL,     send_info           },
+    { 6, NULL,              NULL                }
+};
+
+// TODO: test use of long options on windows
+struct option long_options[] = {
+    { "blocksize",  required_argument, NULL, 'b' },
+    { "help",       no_argument,       NULL, 'h' },
+    { "ip",         required_argument, NULL, 'i' },
+    { "port",       required_argument, NULL, 'p' },
+    { 0, 0, 0, 0 }
 };
 
 // ------ static variables ------
@@ -76,14 +86,17 @@ static int blk_size = 128; /* better to set this based on filesize */
 
 // ------ functions ------
 static void print_usage_and_exit(int status) {
-    printf("Usage: %s [OPTION]... FILE\n", program_name);
+    FILE* out = (status == 0) ? stdout : stderr;
+
+    fprintf(out, "Usage: %s [OPTION]... FILE\n", program_name);
     fputs("\
 \n\
-  -b, --blocksize   manually set the blocksize in bytes\n\
-  -h, --help        display this help message\n\
-  -i, --ip          set the ip address to listen on default is 127.0.0.1\n\
-  -p, --port        set the UDP port to listen on, default is 2534\n\
-", stdout);
+  -b, --blocksize=BYTES     manually set the blocksize in bytes\n\
+  -h, --help                display this help message\n\
+  -i, --ip=IPADDRESS        set the ip address to listen on, the default is \n\
+                              127.0.0.1\n\
+  -p, --port=PORT           set the UDP port to listen on, default is 2534\n\
+", out);
     exit(status);
 }
 
@@ -91,7 +104,7 @@ int main(int argc, char** argv) {
     /* deal with options */
     program_name = argv[0];
     int c;
-    while ( (c = getopt(argc, argv, "b:hi:p:")) != -1) {
+    while ( (c = getopt_long(argc, argv, "b:hi:p:", long_options, NULL)) != -1) {
         switch (c) {
             case 'b':
                 blk_size = atoi(optarg);
@@ -106,7 +119,11 @@ int main(int argc, char** argv) {
                 listen_port = atoi(optarg);
                 break;
             case '?':
-            fprintf(stderr, "bad option %c\n", optopt);
+                print_usage_and_exit(1);
+                break;
+            default: // Shouldn't happen
+                fprintf(stderr, "bad option: %c\n", optopt);
+                print_usage_and_exit(1);
                 break;
         }
     }
@@ -224,7 +241,7 @@ int send_filename(client_s client, const char * filename) {
     if (asprintf(&msg, HDR_FILENAME "%s" ENDL, filename) < 0)
         return ERR_MEM;
     send_std_msg(client, msg);
-    free(msg); 
+    free(msg);
     return 0;
 }
 
