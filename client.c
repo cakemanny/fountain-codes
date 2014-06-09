@@ -39,11 +39,11 @@ typedef struct ftn_cache_s {
 
 
 // ------ Forward declarations ------
-static int proc_file(fountain_src ftn_src);
+static int proc_file(fountain_src ftn_src, file_info_s* file_info);
 static int create_connection();
 static void close_connection();
 static fountain_s* from_network();
-static char* get_remote_filename();
+static int get_remote_file_info(struct file_info_s*);
 
 // TODO: test use of long options on windows
 struct option long_options[] = {
@@ -63,7 +63,10 @@ static char const * program_name = NULL;
 static server_s curr_server = {};
 
 static char * outfilename = NULL;
-static int blk_size = 128;
+
+// The buffer for our pulling packets off the network
+static char* netbuf;
+static int netbuf_len;
 
 // ------ functions ------
 static void print_usage_and_exit(int status) {
@@ -121,17 +124,46 @@ int main(int argc, char** argv) {
     } };
     curr_server = server;
 
+    // define this above any jumps
     int i_should_free_outfilename = 0;
+
+    struct file_info_s file_info;
+    if (get_remote_file_info(&file_info) < 0) {
+        log_err("Failed to get information about the remote file");
+        goto shutdown;
+    }
+    debug("Downloading %s", file_info.filename);
+    odebug("%d", file_info.blk_size);
+
+    int to_alloc = 512;
+    while (to_alloc < 4 * file_info.blk_size) {
+        to_alloc = to_alloc << 1;
+        if (to_alloc >= 8 * 1024) break;
+    }
+    netbuf = malloc(to_alloc);
+    if (!netbuf) {
+        log_err("Failed to allocate the network buffer");
+        goto shutdown;
+    }
+    netbuf_len = to_alloc;
+
     if (!outfilename) {
-        outfilename = get_remote_filename();
+        outfilename = strdup(file_info.filename);
         i_should_free_outfilename = 1;
     }
 
     // do { get some packets, try to decode } while ( not decoded )
-    proc_file(from_network);
+    proc_file(from_network, &file_info);
 
+    // TODO check that this truncate is available in mingw
+    // Think we need to do open() then ftruncate(fd) or chsize(fd)
+    if (truncate(outfilename, file_info.filesize) < 0)
+        log_err("Failed to truncate the output file");
+
+shutdown:
     if (i_should_free_outfilename)
         free(outfilename);
+    free(netbuf);
     close_connection();
 }
 
@@ -173,8 +205,8 @@ static int recv_msg(char* buf, size_t buf_len) {
     do {
         debug("Clearing buffer and waiting for reponse from %s",
                 inet_ntoa(curr_server.address.sin_addr));
-        memset(buf, '\0', BUF_LEN);
-        bytes_recvd = recvfrom(s, buf, BUF_LEN, 0,
+        memset(buf, '\0', buf_len);
+        bytes_recvd = recvfrom(s, buf, buf_len, 0,
                         (struct sockaddr*)&remote_addr,
                         &remote_addr_size);
         if (bytes_recvd < 0)
@@ -192,19 +224,24 @@ static int recv_msg(char* buf, size_t buf_len) {
     return bytes_recvd;
 }
 
-char* get_remote_filename() {
-    send_msg(curr_server, MSG_FILENAME ENDL);
+int get_remote_file_info(file_info_s* file_info) {
+    send_msg(curr_server, MSG_INFO ENDL);
     char buf[BUF_LEN];
     int bytes_recvd = recv_msg(buf, BUF_LEN);
-    if (bytes_recvd < 0) return NULL;
-    if (memcmp(buf, HDR_FILENAME, sizeof HDR_FILENAME -1) == 0) {
-        char * tmp;
-        if (asprintf(&tmp, "%s", buf + sizeof HDR_FILENAME) < 0)
-            return NULL;
-        return tmp; // this will get free'd in main
+    if (bytes_recvd < 0) return -1;
+    struct file_info_s* net_info = (struct file_info_s *) buf;
+    if (net_info->magic == MAGIC_INFO) {
+        if (net_info->blk_size < 0
+                || net_info->num_blocks < 0
+                || net_info->filesize < 0) {
+            log_err("Corrupt packet");
+            return ERR_NETWORK;
+        }
+        memcpy(file_info, net_info, sizeof *file_info);
+        return 0;
     }
-    // Should really consider doing a few retries at this point
-    return NULL;
+    log_err("Packet was not a fileinfo packet");
+    return -1;
 }
 
 static void ftn_cache_alloc(ftn_cache_s* cache) {
@@ -218,20 +255,18 @@ static void ftn_cache_alloc(ftn_cache_s* cache) {
 static void load_from_network(ftn_cache_s* cache) {
     send_msg(curr_server, MSG_WAITING ENDL);
 
-    char buf[BUF_LEN];
-
 
     // we need to do these either 750 times or... have a timeout
     // we might also want to adjust our yield expectation depending
     // on whether we are hitting those timeouts or not...
     for (int i = 0; i < 200; i++) {
-        int bytes_recvd = recv_msg(buf, BUF_LEN);
+        int bytes_recvd = recv_msg(netbuf, netbuf_len);
         if (bytes_recvd < 0)
             handle_error(bytes_recvd, NULL);
 
         buffer_s packet = {
             .length = bytes_recvd,
-            .buffer = buf
+            .buffer = netbuf
         };
         fountain_s* ftn = unpack_fountain(packet);
         if (ftn == NULL) { // Checksum may have failed
@@ -269,38 +304,15 @@ fountain_s* from_network() {
     return output;
 }
 
-static int nsize_in_blocks() {
-    send_msg(curr_server, MSG_SIZE ENDL);
-
-    char buf[BUF_LEN];
-    int bytes_recvd = recv_msg(buf, BUF_LEN);
-    if (bytes_recvd < 0) return ERR_NETWORK;
-
-    int output = 0;
-    if (memcmp(buf, HDR_SIZE, sizeof HDR_SIZE - 1) == 0) {
-        debug("Message received: %s", buf);
-        output = atoi(buf + sizeof HDR_SIZE - 1);
-        debug("Filesize in blocks: %d", output);
-        return output;
-    }
-    // Really we ought to try again until we get te msg we want
-    return -1; // given it an error code I guess...guess
-    //CONTINUE HERE
-}
-
 /* process fountains as they come down the wire
    returns a status code (see errors.c)
  */
-int proc_file(fountain_src ftn_src) {
+int proc_file(fountain_src ftn_src, file_info_s* file_info) {
     int result = 0;
     char * err_str = NULL;
 
-    // prepare to do some output
-    int num_blocks = nsize_in_blocks();
-    if (num_blocks < 0)
-        return handle_error(num_blocks, err_str);
-
-    decodestate_s* state = decodestate_new(blk_size, num_blocks);
+    decodestate_s* state =
+        decodestate_new(file_info->blk_size, file_info->num_blocks);
     if (!state) return handle_error(ERR_MEM, NULL);
 
     state->filename = outfilename;

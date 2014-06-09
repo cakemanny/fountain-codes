@@ -30,12 +30,17 @@
 //
 // A request for info about the file being served
 #define MSG_INFO    "FileInfo"
+#define MAGIC_INFO  54119
+
+#define MSG_FILESIZE    "FileSize"
 
 //
 // The file information that is sent
 typedef struct file_info_s {
+    int magic;          // Should always be MAGIC_INFO
     int blk_size;
     int num_blocks;
+    int filesize;       // The actual size in bytes
     char filename[256];
 } file_info_s;
 

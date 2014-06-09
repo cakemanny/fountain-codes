@@ -4,6 +4,7 @@
 #include <string.h> //strlen
 #include <time.h>
 #include <unistd.h> //getopt
+#include <sys/stat.h>
 #ifdef _WIN32
 #   include "asprintf.h"
 #endif
@@ -26,18 +27,16 @@ static int blk_size = 128;
 static char* meminput = "Hello there you jammy little bugger!";
 
 static int filesize(char const * filename) {
-    FILE* f = fopen(filename, "rb");
-    if (f) {
-        fseek(f, 0, SEEK_END);
-        int size = ftell(f);
-        fclose(f);
-        return size;
-    }
-    return ERR_FOPEN;
+    struct stat st;
+    if (stat(filename, &st) == 0)
+        return st.st_size;
+    else
+        return ERR_FOPEN;
 }
 
 static int fsize_in_blocks(char const * filename) {
     int fsize = filesize(filename);
+    if (fsize < 0) return fsize;
     return (fsize % blk_size)
         ? (fsize / blk_size) + 1 : fsize / blk_size;
 }
@@ -71,6 +70,7 @@ static int proc_file(fountain_src ftn_src) {
     // prepare to do some output
     int num_blocks = (ftn_src == from_file) ?
         fsize_in_blocks(infilename) : size_in_blocks(meminput, blk_size);
+    if (num_blocks < 0) return handle_error(num_blocks, NULL);
 
     decodestate_s* state = decodestate_new(blk_size, num_blocks);
     if (!state) return handle_error(ERR_MEM, NULL);

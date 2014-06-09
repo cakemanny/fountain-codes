@@ -9,6 +9,7 @@
 #include <time.h> //time
 #include <unistd.h> //getopt
 #include <getopt.h> //getopt_long
+#include <sys/stat.h>
 
 /* Windows doesn't seem to provide asprintf.h... */
 #ifdef _WIN32
@@ -138,7 +139,7 @@ int main(int argc, char** argv) {
     srand(time(NULL));
 
     // Check that the file exists
-    FILE* f = fopen(filename, "r");
+    FILE* f = fopen(filename, "rb");
     if (f == NULL) handle_error(ERR_FOPEN, &filename);
     fclose(f);
 
@@ -161,7 +162,6 @@ int main(int argc, char** argv) {
         } else {
             log_info("Unknown msg code: %d", hello);
         }
-        // TODO accept BLOCKSIZE request
     }
 
     close_connection();
@@ -245,21 +245,26 @@ int send_filename(client_s client, const char * filename) {
     return 0;
 }
 
-static int fsize (const char * filename) {
-    FILE* f = fopen(filename, "r");
-    if (!f) return ERR_FOPEN;
-    fseek(f, 0, SEEK_END);
-    int filesize = ftell(f);
-
-    int result = (filesize % blk_size)
-        ? (filesize /blk_size) + 1 : filesize / blk_size;
-    fclose(f);
-    return result;
+static int filesize_in_bytes(const char * filename) {
+    struct stat st;
+    if (stat(filename, &st) == 0)
+        return st.st_size;
+    log_err("Error getting filesize");
+    return -1;
 }
 
+static int fsize_in_blocks (const char * filename) {
+    int filesize = filesize_in_bytes(filename);
+    if (filesize < 0) return filesize;
+
+    return (filesize % blk_size)
+        ? (filesize /blk_size) + 1 : filesize / blk_size;
+}
+
+/* This is the size in blocks not the actual filesize we are sending... */
 int send_size(client_s client, const char * filename) {
     char * msg;
-    int size = fsize(filename);
+    int size = fsize_in_blocks(filename);
     debug("Sending size: %d", size);
     if (asprintf(&msg, HDR_SIZE "%d" ENDL, size) < 0)
         return ERR_MEM;
@@ -279,15 +284,20 @@ int send_blk_size(client_s client, const char * filename) {
 }
 
 int send_info(client_s client, const char * filename) {
-    debug("Sending infor for file %s", filename);
-    file_info_s info = { .blk_size=blk_size };
+    debug("Sending info for file %s", filename);
 
-    info.num_blocks = fsize(filename);
+    file_info_s info = {
+        .magic      = MAGIC_INFO,
+        .blk_size   = blk_size,
+        .num_blocks = fsize_in_blocks(filename),
+        .filesize   = filesize_in_bytes(filename)
+    };
 
     strncpy(info.filename, filename, sizeof info.filename - 1);
 
     odebug("%d", info.blk_size);
     odebug("%d", info.num_blocks);
+    odebug("%d", info.filesize);
     int bytes_sent = sendto(s, (char*)&info, sizeof info, 0,
             (struct sockaddr*)&client.address,
             sizeof client.address);
@@ -311,7 +321,7 @@ int send_fountain(client_s client, fountain_s* ftn) {
 }
 
 int send_block_burst(client_s client, const char * filename) {
-    FILE* f = fopen(filename, "r");
+    FILE* f = fopen(filename, "rb");
     if (!f) return ERR_FOPEN;
     for (int i = 0; i < BURST_SIZE; i++) {
         // make a fountain
