@@ -12,11 +12,16 @@ endif
 
 # We will rarely want a release build so only when release is defined
 ifdef RELEASE
-CFLAGS= -DNDEBUG -Wall -c -O3 -fms-extensions -march=native -Wa,-q
+CFLAGS=-DNDEBUG -Wall -c -O3 -fms-extensions -march=native -Wa,-q
 LDFLAGS=-flto
 else
 CFLAGS=-g -Wall -c -O0 -fms-extensions
 LDFLAGS=
+endif
+
+ifdef PROFILE
+CFLAGS=-pg -Wall -c -O0 -fms-extensions
+LDFLAGS=-pg
 endif
 
 LDLIBS=

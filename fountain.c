@@ -8,6 +8,7 @@
 #include "errors.h"
 #include "fountain.h"
 #include "dbg.h"
+#include "randgen.h"
 
 #define BUFFER_SIZE 256
 
@@ -27,6 +28,9 @@ static int size_in_blocks(const char* string, int blk_size) {
         ? (string_len / blk_size) + 1 : string_len / blk_size;
 }
 
+/*
+ * param n = filesize in blocks
+ */
 static int choose_num_blocks(const int n) {
     static int* dist = NULL;
     static int dist_n = 0;
@@ -53,11 +57,18 @@ static int choose_num_blocks(const int n) {
     return d;
 }
 
-static int select_blocks(const int n, fountain_s* ftn) {
-    int d = choose_num_blocks(n);
+static int int_compare(const void* a, const void* b) {
+    return ( *(int*)a - *(int*)b );
+}
+
+/*
+ * param n FileSize in blocks
+ * param d num_blocks for this fountain
+ */
+static int* select_blocks(const int n, const int d) {
 
     int* blocks = malloc(d * sizeof *blocks);
-    if (!blocks) return ERR_MEM;
+    if (!blocks) return NULL;
 
     for (int i = 0; i < d; i++) {
         blocks[i] = rand() % n;
@@ -68,10 +79,37 @@ static int select_blocks(const int n, fountain_s* ftn) {
             }
         }
     }
+    qsort(blocks, d, sizeof *blocks, int_compare);
 
-    ftn->num_blocks = d;
-    ftn->block = blocks;
-    return 0;
+    return blocks;
+}
+
+/* This is going to replace the above shortly
+ *
+ * param n filesize in blocks
+ * param d number of blocks in fountain/packet
+ */
+static int* seeded_select_blocks(int n, int d, unsigned long seed) {
+
+    int* blocks = malloc(d * sizeof *blocks);
+    if (!blocks) return NULL;
+
+    for (int i = 0; i < d; i++) {
+        randgen_s gen = next_rand(seed);
+        seed = gen.next_seed;
+
+        blocks[i] = gen.result % n;
+        for (int j = 0; j < i; j++) {
+            if (blocks[i] == blocks[j]) {
+                i--;
+                break;
+            }
+        }
+    }
+    qsort(blocks, d, sizeof *blocks, int_compare);
+
+// Would be good to return the new seed aswell...
+    return blocks;
 }
 
 /* makes a fountain fountain, given a file */
@@ -87,7 +125,10 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
         ? (filesize /blk_size) + 1 : filesize / blk_size;
     output->blk_size = blk_size;
 
-    if (select_blocks(n, output) < 0) goto free_ftn;
+    output->num_blocks = choose_num_blocks(n);
+    output->block = select_blocks(n, output->num_blocks);
+    if (!output->block)
+        goto free_ftn;
 
     // XOR blocks together
     // Why blk_size + 1? we are no longer terminate with NULL
@@ -124,7 +165,10 @@ fountain_s* make_fountain(const char* string, int blk_size) {
     int n = size_in_blocks(string, blk_size);
     output->blk_size = blk_size;
 
-    if (select_blocks(n, output) < 0) goto free_ob;
+    output->num_blocks = choose_num_blocks(n);
+    output->block = select_blocks(n, output->num_blocks);
+    if (!output->block)
+        goto free_ob;
 
     // XOR blocks together
     output->string = calloc(blk_size+1, sizeof *output->string);
@@ -297,6 +341,71 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
         }
     }
     return 0;
+}
+
+static int fountain_issubset(fountain_s* sub, fountain_s* super) {
+    // We use the fact that the block list is ordered to create
+    // a faster check O(n)
+    int i = 0, j = 0;
+    for (int i = 0; i < super->num_blocks; i++) {
+        if (super->block[i] == sub->block[j])
+            j++;
+    }
+    return (j == sub->num_blocks);
+}
+
+// This function can possibly be used instead of the 'Part 2' part for
+// single blocks
+static int reduce_against_hold(packethold_s* hold, fountain_s* ftn) {
+    int blk_size = ftn->blk_size;
+
+    for (size_t i = 0; i < hold->offset; i++) {
+        fountain_s* from_hold = hold->fountain + i;
+
+        if (from_hold->num_blocks == ftn->num_blocks)
+            continue; // We are looking for strict subsets
+        if (from_hold->num_blocks > ftn->num_blocks) {
+            // Check if ftn is a subset of from_hold
+            if (fountain_issubset(ftn, from_hold)) {
+                // Here do the reduction
+                // 1. xorncpy smaller into larger
+                // 2. reallocate the actual block numbers
+                // 3. decrement the number of blocks
+                xorncpy(from_hold->string, ftn->string, blk_size);
+
+                int num_new_blocks = from_hold->num_blocks - ftn->num_blocks;
+                int new_blocks[num_new_blocks];
+                int l = 0;
+                int m = 0;
+                for (int j = 0; j < from_hold->num_blocks; j++) {
+                    // Each block not in ftn can stay
+                    if (from_hold->block[j] == ftn->block[l])
+                        l++;
+                    else
+                        new_blocks[m++] = from_hold->block[j];
+                }
+                int* tmp_ptr = realloc(from_hold->block, num_new_blocks * sizeof(int));
+                if (tmp_ptr == NULL) return ERR_MEM;
+                from_hold->block = tmp_ptr;
+
+                memcpy(from_hold->block, new_blocks, num_new_blocks * sizeof(int));
+
+                from_hold->num_blocks = num_new_blocks;
+                // Now swap and send ftn for retest
+                fountain_s tmp_ftn = *ftn;
+                *ftn = *from_hold;
+                *from_hold = tmp_ftn;
+                return 25; // RETEST
+            }
+        } else {
+            // Check if ftn is a superset of from_hold
+            if (fountain_issubset(from_hold, ftn)) {
+                // Here reduce the ftn using the hold item, then send for a
+                // retest
+            }
+        }
+    }
+    return 0; // No more to do
 }
 
 /* the part that sets up the decodestate will be in client.c */

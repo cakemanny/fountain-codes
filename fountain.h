@@ -11,6 +11,8 @@ typedef struct fountain_s {
     int num_blocks;
     int* block; // they start from block 0 -- TODO rename this blocks
     int blk_size;
+    // To add: unsigned long seed; but need to look at all the serialization
+    // etc first
 } fountain_s;
 
 typedef struct packethold_s {
