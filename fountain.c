@@ -10,6 +10,10 @@
 #include "dbg.h"
 #include "randgen.h"
 
+#define ISBITSET(x, i) (( (x)[i>>3] & (1<<((i)&7)) ) != 0)
+#define SETBIT(x, i) (x)[(i)>>3] |= (1<<((i)&7))
+#define CLEARBIT(x, i) (x)[(i)>>3] &= (1<<((i)&7)) ^ 0xFF
+
 #define BUFFER_SIZE 256
 
 static char * xorncpy (char* destination, const char* source, register size_t n) {
@@ -231,6 +235,79 @@ cleanup:
     return ERR_MEM;
 }
 
+static int fountain_issubset(const fountain_s* sub, const fountain_s* super) {
+    // We use the fact that the block list is ordered to create
+    // a faster check O(n)
+    int j = 0;
+    for (int i = 0; i < super->num_blocks; i++) {
+        if (super->block[i] == sub->block[j])
+            j++;
+    }
+    return (j == sub->num_blocks);
+}
+
+/*
+ * param sub the subset fountain used to reduce
+ * param super the fountain to be reduced
+ */
+static int reduce_fountain(const fountain_s* sub, fountain_s* super) {
+    // Here do the reduction
+    // 1. xorncpy smaller into larger
+    // 2. reallocate the actual block numbers
+    // 3. decrement the number of blocks
+
+    xorncpy(super->string, sub->string, sub->blk_size);
+    int new_num_blocks = super->num_blocks - sub->num_blocks;
+    int new_blocks[new_num_blocks];
+
+    int i = 0, j = 0, k = 0;
+    for (; i < super->num_blocks; i++) {
+        if (super->block[i] == sub->block[j])
+            j++;
+        else
+            new_blocks[k++] = super->block[i];
+    }
+    // don't bother with realloc super->block, this is always a downsize
+
+    memcpy(super->block, new_blocks, new_num_blocks * sizeof(int));
+    super->num_blocks = new_num_blocks;
+    return 0;
+}
+
+// This function can possibly be used instead of the 'Part 2' part for
+// single blocks
+static int reduce_against_hold(packethold_s* hold, fountain_s* ftn) {
+
+    for (size_t i = 0; i < hold->offset; i++) {
+        fountain_s* from_hold = hold->fountain + i;
+
+        if (from_hold->num_blocks == ftn->num_blocks)
+            continue; // We are looking for strict subsets
+
+        if (from_hold->num_blocks > ftn->num_blocks) {
+            // Check if ftn is a subset of from_hold
+            if (fountain_issubset(ftn, from_hold)) {
+                if (reduce_fountain(ftn, from_hold) < 0)
+                    return ERR_MEM;
+
+                SETBIT(hold->mark, i); // Mark the packet hold for retest after
+            }
+        } else {
+            // Check if ftn is a superset of from_hold
+            if (fountain_issubset(from_hold, ftn)) {
+                // Here reduce the ftn using the hold item, then send for a
+                // retest
+                if (reduce_fountain(from_hold, ftn) < 0)
+                    return ERR_MEM;
+
+                return 500; // RETEST -- need to define this
+            }
+        }
+    }
+    return 0; // No more to do
+}
+
+
 typedef int (*blockread_f)(void* /*buffer*/,
                             int /*blk_num*/,
                             decodestate_s* /*state*/);
@@ -249,6 +326,10 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
     char* blkdec = state->blkdecoded;
     packethold_s* hold = state->hold;
     int blk_size = state->blk_size;
+
+    #ifndef NDEBUG
+    packethold_print(hold);
+    #endif
 
     do {
         retest = false;
@@ -301,7 +382,7 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                     free_fountain(tmp_ftn);
                 }
             }
-        } else { /* size > 1, check against unsolved blocks */
+        } else { /* size > 1, check against solved blocks */
             for (int i = 0; i < ftn->num_blocks; i++) {
                 if (blkdec[ftn->block[i]]) {
                     // Xor the decoded block out of a new packet
@@ -312,7 +393,7 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
 
                     // Remove the decoded block number
                     for (int j = i; j < ftn->num_blocks - 1; j++) {
-                        ftn->block[j] = ftn->block[j+1];
+                        ftn->block[j] = ftn->block[j + 1];
                     }
                     ftn->block[ftn->num_blocks - 1] = 0;
 
@@ -324,7 +405,46 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                     break;
                 }
             }
+            if (!retest) {
+                odebug("%d", ftn->num_blocks);
+                int result = reduce_against_hold(hold, ftn);
+                if (result < 0) return result;
+                if (result) {
+                    retest = true;
+                    debug("Result = %d, doing retest", result);
+                    odebug("%d", ftn->num_blocks);
+                }
+                for (int i = 0; i < hold->num_packets; i++) {
+                    if (ISBITSET(hold->mark, i)) {
+                        // *** This is repeated from above >>
+                        // TODO factor this out as a function
+                        if (hold->fountain[i].num_blocks == 1) {
+                            // move into output if we don't already have it
+                            fountain_s* tmp_ftn = packethold_remove(hold, i);
+                            if (!tmp_ftn) return ERR_MEM;
+                            if (blkdec[tmp_ftn->block[0]] == 0) { /* not yet decoded so
+                                                                    write to file */
+                                if (bwrite(tmp_ftn->string,
+                                        tmp_ftn->block[0],
+                                        state) != 1) {
+                                    free_fountain(tmp_ftn);
+                                    return ERR_BWRITE;
+                                }
+                                blkdec[tmp_ftn->block[0]] = 1;
+                            }
+                            free_fountain(tmp_ftn);
 
+                        } else {
+                            int result2 =
+                            reduce_against_hold(hold, &hold->fountain[i]);
+
+                            if (result2 < 0) return result2;
+                        }
+                        CLEARBIT(hold->mark, i);
+                    }
+                }
+                // TODO: do unmark and test all marked packets in the hold
+            }
         }
     } while (retest);
     if (ftn->num_blocks != 1) {
@@ -343,70 +463,6 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
     return 0;
 }
 
-static int fountain_issubset(fountain_s* sub, fountain_s* super) {
-    // We use the fact that the block list is ordered to create
-    // a faster check O(n)
-    int i = 0, j = 0;
-    for (int i = 0; i < super->num_blocks; i++) {
-        if (super->block[i] == sub->block[j])
-            j++;
-    }
-    return (j == sub->num_blocks);
-}
-
-// This function can possibly be used instead of the 'Part 2' part for
-// single blocks
-static int reduce_against_hold(packethold_s* hold, fountain_s* ftn) {
-    int blk_size = ftn->blk_size;
-
-    for (size_t i = 0; i < hold->offset; i++) {
-        fountain_s* from_hold = hold->fountain + i;
-
-        if (from_hold->num_blocks == ftn->num_blocks)
-            continue; // We are looking for strict subsets
-        if (from_hold->num_blocks > ftn->num_blocks) {
-            // Check if ftn is a subset of from_hold
-            if (fountain_issubset(ftn, from_hold)) {
-                // Here do the reduction
-                // 1. xorncpy smaller into larger
-                // 2. reallocate the actual block numbers
-                // 3. decrement the number of blocks
-                xorncpy(from_hold->string, ftn->string, blk_size);
-
-                int num_new_blocks = from_hold->num_blocks - ftn->num_blocks;
-                int new_blocks[num_new_blocks];
-                int l = 0;
-                int m = 0;
-                for (int j = 0; j < from_hold->num_blocks; j++) {
-                    // Each block not in ftn can stay
-                    if (from_hold->block[j] == ftn->block[l])
-                        l++;
-                    else
-                        new_blocks[m++] = from_hold->block[j];
-                }
-                int* tmp_ptr = realloc(from_hold->block, num_new_blocks * sizeof(int));
-                if (tmp_ptr == NULL) return ERR_MEM;
-                from_hold->block = tmp_ptr;
-
-                memcpy(from_hold->block, new_blocks, num_new_blocks * sizeof(int));
-
-                from_hold->num_blocks = num_new_blocks;
-                // Now swap and send ftn for retest
-                fountain_s tmp_ftn = *ftn;
-                *ftn = *from_hold;
-                *from_hold = tmp_ftn;
-                return 25; // RETEST
-            }
-        } else {
-            // Check if ftn is a superset of from_hold
-            if (fountain_issubset(from_hold, ftn)) {
-                // Here reduce the ftn using the hold item, then send for a
-                // retest
-            }
-        }
-    }
-    return 0; // No more to do
-}
 
 /* the part that sets up the decodestate will be in client.c */
 
@@ -551,7 +607,9 @@ fountain_s* unpack_fountain(buffer_s packet) {
     int calculated = Fletcher16((uint8_t*)packed_ftn, packet.length - sizeof checksum);
     odebug("%d", checksum);
     odebug("%d", calculated);
-    if (checksum != calculated) return NULL;
+    if (checksum != calculated) {
+        log_warn("checksums do not match");
+        return NULL; }
 
     fountain_s* ftn = malloc(sizeof *ftn);
     if (!ftn)  return NULL;
@@ -588,7 +646,13 @@ packethold_s* packethold_new() {
     hold->fountain = calloc(BUFFER_SIZE, sizeof *hold->fountain);
     if (!hold->fountain) goto free_hold;
 
+    hold->mark = calloc(BUFFER_SIZE/8 + 1, sizeof(char));
+    if (!hold->mark) goto free_fountain;
+
     return hold;
+free_fountain:
+    free(hold->fountain);
+    hold->fountain = NULL;
 free_hold:
     packethold_free(hold);
     return NULL;
@@ -599,6 +663,7 @@ void packethold_free(packethold_s* hold) {
         if (hold->fountain[i].string) free(hold->fountain[i].string);
         if (hold->fountain[i].block) free(hold->fountain[i].block);
     }
+    if (hold->mark) free(hold->mark);
     if (hold->fountain) free(hold->fountain);
     free(hold);
 }
@@ -609,9 +674,14 @@ fountain_s* packethold_remove(packethold_s* hold, int pos) {
     if (!output) return NULL;
     *output = hold->fountain[pos];
 
-    for (int j = pos; j < hold->num_packets - 1; j++)
+    char* mark = hold->mark;
+    for (int j = pos; j < hold->num_packets - 1; j++) {
         hold->fountain[j] = hold->fountain[j+1];
+        if (ISBITSET(mark, j)) SETBIT(mark, j + 1);
+        else CLEARBIT(mark, j + 1);
+    }
     memset(hold->fountain + hold->offset - 1, 0, sizeof *hold->fountain);
+    CLEARBIT(mark, hold->num_packets);
     hold->offset--;
     hold->num_packets--;
 
@@ -621,6 +691,7 @@ fountain_s* packethold_remove(packethold_s* hold, int pos) {
         odebug("%d", hold->num_packets);
         odebug("%zd", hold->offset);
         odebug("%d", hold->num_slots);
+
         fountain_s* tmp_ptr = realloc(hold->fountain,
                 hold->num_packets * sizeof *hold->fountain);
         if (tmp_ptr) hold->fountain = tmp_ptr;
@@ -628,6 +699,14 @@ fountain_s* packethold_remove(packethold_s* hold, int pos) {
             handle_error(REALLOC_ERR, NULL);
             return NULL;
         }
+
+        char* mark_tmp_ptr = realloc(hold->mark, hold->num_packets/8 + 1);
+        if (mark_tmp_ptr) hold->mark = mark_tmp_ptr;
+        else {
+            handle_error(REALLOC_ERR, NULL);
+            return NULL;
+        }
+
         hold->num_slots = hold->num_packets;
     }
 
@@ -646,13 +725,37 @@ int packethold_add(packethold_s* hold, fountain_s* ftn) {
             return REALLOC_ERR;
         }
 
+        char* mark_tmp_ptr = realloc(hold->mark, space/8 + 1);
+        if (!mark_tmp_ptr) {
+            handle_error(REALLOC_ERR, NULL);
+            return REALLOC_ERR;
+        } else
+            hold->mark = mark_tmp_ptr;
+
         hold->num_slots = space;
     }
 
     if (fountain_copy(&hold->fountain[hold->offset++], ftn) < 0)
         return ERR_MEM;
+    CLEARBIT(hold->mark, hold->num_packets);
     hold->num_packets++;
     return 0;
+}
+
+void packethold_print(packethold_s* hold) {
+    fprintf(stderr, "==== Packet Hold ====\n");
+    fprintf(stderr, "\tnum_packets: %d\n\n", hold->num_packets);
+    for (int i = 0; i < hold->num_packets; i++) {
+        fountain_s* ftn = hold->fountain + i;
+        if (ISBITSET(hold->mark, i))
+            fprintf(stderr, " *");
+        else
+            fprintf(stderr, "  ");
+        for (int j = 0; j < ftn->num_blocks; j++)
+            fprintf(stderr, " %d", ftn->block[j]);
+        fprintf(stderr, "\n");
+    }
+    fprintf(stderr, "==== End P-Hold ====\n\n");
 }
 
 /* ============ Decode state Functions ===================================== */

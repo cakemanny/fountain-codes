@@ -12,7 +12,8 @@ endif
 
 # We will rarely want a release build so only when release is defined
 ifdef RELEASE
-CFLAGS=-DNDEBUG -Wall -c -O3 -fms-extensions -march=native -Wa,-q
+#CFLAGS=-DNDEBUG -Wall -c -O3 -fms-extensions -march=native -Wa,-q -mavx2
+CFLAGS=-DNDEBUG -Wall -c -O3 -fms-extensions -march=corei7 -Wa,-q -mavx2
 LDFLAGS=-flto
 else
 CFLAGS=-g -Wall -c -O0 -fms-extensions
@@ -25,7 +26,7 @@ LDFLAGS=-pg
 endif
 
 LDLIBS=
-ifeq "$(OS)" "Windows_NT" 
+ifeq "$(OS)" "Windows_NT"
 LDLIBS=-lws2_32
 endif
 

@@ -330,7 +330,7 @@ int proc_file(fountain_src ftn_src, file_info_s* file_info) {
         if (result < 0) goto cleanup;
     } while (!decodestate_is_decoded(state));
 
-    odebug("%d", state->packets_so_far);
+    log_info("Total packets required for download: %d", state->packets_so_far);
 
 cleanup:
     fclose(state->fp);
