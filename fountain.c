@@ -215,6 +215,15 @@ cleanup:
     return ERR_MEM;
 }
 
+void print_fountain(const fountain_s * ftn) {
+    printf("{ num_blocks: %d, blk_size: %d, seed: %lu, blocks: ",
+            ftn->num_blocks, ftn->blk_size, ftn->seed);
+    for (int i = 0; i < ftn->num_blocks; i++) {
+        printf("%d ", ftn->block[i]);
+    }
+    printf("}\n");
+}
+
 static int fountain_issubset(const fountain_s* sub, const fountain_s* super) {
     // We use the fact that the block list is ordered to create
     // a faster check O(n)
@@ -307,9 +316,9 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
     packethold_s* hold = state->hold;
     int blk_size = state->blk_size;
 
-    #ifndef NDEBUG
-    packethold_print(hold);
-    #endif
+    //#ifndef NDEBUG
+    //packethold_print(hold);
+    //#endif
 
     do {
         retest = false;
@@ -326,7 +335,7 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
             // Part two check against blocks in hold
             bool match = false;
             for (int i = 0; i < hold->num_packets; i++) {
-                for(int j = 0; j < hold->fountain[i].num_blocks; j++) {
+                for (int j = 0; j < hold->fountain[i].num_blocks; j++) {
                     if (hold->fountain[i].block[j] == ftn->block[0]) {
                         // Xor out the hold block
                         xorncpy(hold->fountain[i].string, ftn->string, blk_size);
@@ -396,6 +405,7 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                 }
                 for (int i = 0; i < hold->num_packets; i++) {
                     if (ISBITSET(hold->mark, i)) {
+                        int result2 = 0;
                         // *** This is repeated from above >>
                         // TODO factor this out as a function
                         if (hold->fountain[i].num_blocks == 1) {
@@ -415,15 +425,14 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                             free_fountain(tmp_ftn);
 
                         } else {
-                            int result2 =
-                            reduce_against_hold(hold, &hold->fountain[i]);
+                            result2 =
+                                reduce_against_hold(hold, &hold->fountain[i]);
 
                             if (result2 < 0) return result2;
                         }
-                        CLEARBIT(hold->mark, i);
+                        if (!result2) CLEARBIT(hold->mark, i);
                     }
                 }
-                // TODO: do unmark and test all marked packets in the hold
             }
         }
     } while (retest);

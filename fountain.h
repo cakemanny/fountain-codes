@@ -49,6 +49,7 @@ fountain_s* fmake_fountain(FILE* f, int blk_size); /* allocs memory */
 void free_fountain(fountain_s* ftn);
 int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2);
 char* decode_fountain(const char* string, int blk_size);
+void print_fountain(const fountain_s * ftn);
 
 /* trys to decode the given fountain, it will write output to the file.
    returns 0 on success

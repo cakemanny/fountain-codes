@@ -145,6 +145,7 @@ int main(int argc, char** argv) {
 
     int error;
     if ((error = create_connection(listen_ip)) < 0) {
+        log_err("Unable to bind to socket");
         close_connection();
         return -1;
     }
