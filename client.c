@@ -262,6 +262,9 @@ static void load_from_network(ftn_cache_s* cache) {
     // we need to do these either 750 times or... have a timeout
     // we might also want to adjust our yield expectation depending
     // on whether we are hitting those timeouts or not...
+    //
+    // TODO Next important task, work out how to switch between filling the
+    // cache when there are packets and decoding when there aren't
     for (int i = 0; i < 200; i++) {
         int bytes_recvd = recv_msg(netbuf, netbuf_len);
         if (bytes_recvd < 0)

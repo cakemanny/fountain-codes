@@ -156,7 +156,6 @@ int main(int argc, char** argv) {
     int hello;
     while ((hello = recvd_hello(&client)) >= 0) {
         if (hello) {
-            odebug("%d", hello);
             debug("About to despatch for %s", lookup_table[hello].msg);
             if ((error = lookup_table[hello].despatcher(client, filename)) < 0)
                 handle_error(error, NULL);

@@ -5,6 +5,7 @@
 #include <time.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 #include "errors.h"
 #include "fountain.h"
 #include "dbg.h"
@@ -36,29 +37,11 @@ static int size_in_blocks(const char* string, int blk_size) {
  * param n = filesize in blocks
  */
 static int choose_num_blocks(const int n) {
-    static int* dist = NULL;
-    static int dist_n = 0;
-
-    const int d_size = n*(n+1)/2;
-    if (dist_n != n) {
-        if (dist) free(dist); /* assumption broken, free cache */
-        dist = malloc(d_size * sizeof *dist);
-        if (!dist) return 1; /* We ran out of memory, should probs die, but
-                            * maybe we can squeeze out one more block */
-
-        int* lpdist = dist;
-        for (int m = n; m > 0; m--) {
-            for (int i = 0; i < m; i++) {
-                *lpdist++ = n - m + 1;
-            }
-        }
-        dist_n = n;
-    }
-
-    int d = dist[rand() % d_size];
-
-    /* see how we don't free dist... */
-    return d;
+    // Effectively uniform random double between 0 and 1
+    double x = (double)rand() / (double)RAND_MAX;
+    // Distribute to make smaller blocks more common
+    double d = (double)n * x * x;
+    return (int) ceil(d);
 }
 
 static int int_compare(const void* a, const void* b) {
@@ -249,8 +232,7 @@ static int reduce_fountain(const fountain_s* sub, fountain_s* super) {
     int new_num_blocks = super->num_blocks - sub->num_blocks;
     int new_blocks[new_num_blocks];
 
-    int i = 0, j = 0, k = 0;
-    for (; i < super->num_blocks; i++) {
+    for (int i = 0, j = 0, k = 0; i < super->num_blocks; i++) {
         if (super->block[i] == sub->block[j])
             j++;
         else
@@ -400,12 +382,11 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                 if (result < 0) return result;
                 if (result) {
                     retest = true;
+                    odebug("%d after", ftn->num_blocks);
                     debug("Result = %d, doing retest", result);
-                    odebug("%d", ftn->num_blocks);
                 }
                 for (int i = 0; i < hold->num_packets; i++) {
                     if (ISBITSET(hold->mark, i)) {
-                        int result2 = 0;
                         // *** This is repeated from above >>
                         // TODO factor this out as a function
                         if (hold->fountain[i].num_blocks == 1) {
@@ -424,13 +405,8 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                             }
                             free_fountain(tmp_ftn);
 
-                        } else {
-                            result2 =
-                                reduce_against_hold(hold, &hold->fountain[i]);
-
-                            if (result2 < 0) return result2;
                         }
-                        if (!result2) CLEARBIT(hold->mark, i);
+                        CLEARBIT(hold->mark, i);
                     }
                 }
             }

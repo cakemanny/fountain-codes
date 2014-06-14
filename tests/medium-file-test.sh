@@ -30,7 +30,9 @@ rm -f $output
 ../server --blocksize=1024 $input 2>/dev/null &
 SERVID_PID=$!
 
-sleep 1
+echo Waiting for server to setup...
+sleep 2
+echo Starting client
 
 starttime=$(date +"%s")
 
@@ -50,7 +52,7 @@ exitvalue=1
 echo
 if [ -z "$(cmp $input $output)" ]; then
     if [[ $totaltime > 4 ]]; then
-        echo '    ':::FAILED::: Files matched but this took longer than 4  seconds. Total time was $totaltime
+        echo '    ':::FAILED::: Files matched but this took longer than 4 seconds. Total time was $totaltime
     else
         echo '    ':::TEST PASSED::: The files match
         exitvalue=0
