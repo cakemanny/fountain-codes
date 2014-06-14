@@ -68,6 +68,8 @@ static char * outfilename = NULL;
 static char* netbuf;
 static int netbuf_len;
 
+static int filesize_in_blocks = 0;
+
 // ------ functions ------
 static void print_usage_and_exit(int status) {
     FILE* out = (status == 0) ? stdout : stderr;
@@ -152,6 +154,7 @@ int main(int argc, char** argv) {
         i_should_free_outfilename = 1;
     }
 
+    filesize_in_blocks = file_info.num_blocks;
     // do { get some packets, try to decode } while ( not decoded )
     proc_file(from_network, &file_info);
 
@@ -268,7 +271,7 @@ static void load_from_network(ftn_cache_s* cache) {
             .length = bytes_recvd,
             .buffer = netbuf
         };
-        fountain_s* ftn = unpack_fountain(packet);
+        fountain_s* ftn = unpack_fountain(packet, filesize_in_blocks);
         if (ftn == NULL) { // Checksum may have failed
             // If the system runs out of memory this may become an infinite
             // loop... we could create an int offset instead of using

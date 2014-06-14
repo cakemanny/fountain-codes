@@ -11,8 +11,7 @@ typedef struct fountain_s {
     int num_blocks;
     int* block; // they start from block 0 -- TODO rename this blocks
     int blk_size;
-    // To add: unsigned long seed; but need to look at all the serialization
-    // etc first
+    unsigned long seed;
 } fountain_s;
 
 typedef struct packethold_s {
@@ -86,7 +85,7 @@ buffer_s pack_fountain(fountain_s* ftn);
 
    returns A pointer to the deserialized fountain or NULL on failure
 */
-fountain_s* unpack_fountain(buffer_s packet);
+fountain_s* unpack_fountain(buffer_s packet, int filesize_in_blocks);
 
 /* ============ packethold_s functions  ==================================== */
 packethold_s* packethold_new(); /* allocs memory */

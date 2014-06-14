@@ -65,29 +65,6 @@ static int int_compare(const void* a, const void* b) {
     return ( *(int*)a - *(int*)b );
 }
 
-/*
- * param n FileSize in blocks
- * param d num_blocks for this fountain
- */
-static int* select_blocks(const int n, const int d) {
-
-    int* blocks = malloc(d * sizeof *blocks);
-    if (!blocks) return NULL;
-
-    for (int i = 0; i < d; i++) {
-        blocks[i] = rand() % n;
-        for (int j = 0; j < i; j++) {
-            if (blocks[i] == blocks[j]) {
-                i--;
-                break;
-            }
-        }
-    }
-    qsort(blocks, d, sizeof *blocks, int_compare);
-
-    return blocks;
-}
-
 /* This is going to replace the above shortly
  *
  * param n filesize in blocks
@@ -130,7 +107,8 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
     output->blk_size = blk_size;
 
     output->num_blocks = choose_num_blocks(n);
-    output->block = select_blocks(n, output->num_blocks);
+    output->seed = rand();
+    output->block = seeded_select_blocks(n, output->num_blocks, output->seed);
     if (!output->block)
         goto free_ftn;
 
@@ -170,7 +148,8 @@ fountain_s* make_fountain(const char* string, int blk_size) {
     output->blk_size = blk_size;
 
     output->num_blocks = choose_num_blocks(n);
-    output->block = select_blocks(n, output->num_blocks);
+    output->seed = rand();
+    output->block = seeded_select_blocks(n, output->num_blocks, output->seed);
     if (!output->block)
         goto free_ob;
 
@@ -217,6 +196,7 @@ int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2) {
 int fountain_copy(fountain_s* dst, fountain_s* src) {
     int blk_size = (dst->blk_size = src->blk_size);
     dst->num_blocks = src->num_blocks;
+    dst->seed = src->seed;
 
     dst->string = malloc(blk_size * sizeof *dst->string);
     if (!dst->string) goto cleanup;
@@ -556,8 +536,8 @@ static uint16_t Fletcher16(uint8_t const * data, int count)
 static int fountain_packet_size(fountain_s* ftn) {
     return sizeof(uint16_t) // Make space for the checksum
         + sizeof *ftn
-        + ftn->blk_size
-        + ftn->num_blocks * sizeof *ftn->block;
+        + ftn->blk_size;
+    // don't transfer the block list
 }
 
 /* Serializes the sub-structures so that we can send it across the network
@@ -575,13 +555,10 @@ buffer_s pack_fountain(fountain_s* ftn) {
 
     memcpy(packed_ftn, ftn, sizeof *ftn);
     memcpy(packed_ftn + sizeof *ftn, ftn->string, ftn->blk_size);
-    memcpy(packed_ftn + sizeof *ftn + ftn->blk_size,
-            ftn->block,
-            ftn->num_blocks * sizeof *ftn->block);
 
     fountain_s* f_ptr = (fountain_s*) packed_ftn;
     f_ptr->string = packed_ftn + sizeof *ftn;
-    f_ptr->block = packed_ftn + sizeof *ftn + ftn->blk_size;
+    f_ptr->block = 0;
 
     // now we can calculate and fill in the hole at the beginning
     checksum = Fletcher16(packed_ftn, packet_size - sizeof checksum);
@@ -594,7 +571,7 @@ buffer_s pack_fountain(fountain_s* ftn) {
 }
 
 
-fountain_s* unpack_fountain(buffer_s packet) {
+fountain_s* unpack_fountain(buffer_s packet, int filesize_in_blocks) {
     if (!packet.buffer) return NULL;
 
     uint16_t checksum = *((uint16_t*)packet.buffer);
@@ -620,10 +597,10 @@ fountain_s* unpack_fountain(buffer_s packet) {
     if (!ftn->string) goto free_fountain;
     memcpy(ftn->string, packed_ftn + sizeof *ftn, ftn->blk_size);
 
-    ftn->block = malloc(ftn->num_blocks * sizeof *ftn->block);
+    ftn->block = seeded_select_blocks(
+            filesize_in_blocks, ftn->num_blocks, ftn->seed);
+
     if (!ftn->block) goto free_string;
-    memcpy(ftn->block, packed_ftn + sizeof *ftn + ftn->blk_size,
-            ftn->num_blocks * sizeof *ftn->block);
 
     return ftn;
 free_string:
@@ -775,9 +752,11 @@ decodestate_s* decodestate_new(int blk_size, int num_blocks) {
     decodestate_s* output = malloc(sizeof *output);
     if (!output) return NULL;
 
-    decodestate_s tmp = {.num_blocks = num_blocks, .packets_so_far = 0,
-                         .blk_size = blk_size};
-    *output = tmp;
+    *output = (decodestate_s) {
+        .num_blocks = num_blocks,
+        .packets_so_far = 0,
+        .blk_size = blk_size
+    };
 
     output->hold = packethold_new();
     if (!output->hold) goto cleanup;
