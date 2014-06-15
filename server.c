@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
                 break;
         }
     }
-    char const * filename;
+    char const * filename = NULL;
     if (optind < argc) {
         filename = argv[optind];
     } else {

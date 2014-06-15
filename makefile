@@ -15,12 +15,10 @@ endif
 
 # We will rarely want a release build so only when release is defined
 ifdef RELEASE
-CFLAGS=-DNDEBUG -Wall -c -O3 -fms-extensions
+CFLAGS=-DNDEBUG -Wall -c -O3 -fms-extensions -march=native
 
 ifeq "$(PLATFORM)" "Darwin"
-CFLAGS+=-march=corei7 -Wa,-q -mavx2
-else
-CFLAGS+=-march=native
+CFLAGS+=-Wa,-q -mno-avx2 -mno-avx -mno-bmi2 # -mavx2
 endif # Platform
 
 LDFLAGS=-flto
