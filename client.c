@@ -10,6 +10,7 @@
 #include <getopt.h> //getopt_long
 
 #ifdef _WIN32
+#   include <fcntl.h> // open -- the mingw unix open
 #   include "asprintf.h"
 #endif
 #include "errors.h"
@@ -160,8 +161,16 @@ int main(int argc, char** argv) {
 
     // TODO check that this truncate is available in mingw
     // Think we need to do open() then ftruncate(fd) or chsize(fd)
+#ifdef _WIN32
+    int fd = open(outfilename, O_RDONLY);
+    if (fd >= 0 && ftruncate(fd, file_info.filesize) >= 0) {
+        close(fd);
+    } else
+        log_err("Failed to truncate the output file");
+#else
     if (truncate(outfilename, file_info.filesize) < 0)
         log_err("Failed to truncate the output file");
+#endif // _WIN32
 
 shutdown:
     if (i_should_free_outfilename)
