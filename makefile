@@ -3,11 +3,11 @@ SHELL = /bin/sh
 
 # Basically we want to use gcc with c11 semantics
 ifndef CC
-CC=gcc -std=c11
+CC=gcc -std=gnu11
 else ifeq (,$(findstring gcc,$(CC)))
-CC=gcc -std=c11
+CC=gcc -std=gnu11
 else ifeq (,$(findstring std,$(CC)))
-CC += -std=c11
+CC += -std=gnu11
 endif
 
 # We will rarely want a release build so only when release is defined
