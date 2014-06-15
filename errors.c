@@ -40,6 +40,9 @@ int handle_error(int error_number, void* args) {
         case ERR_CONNECTION:
             pe("An error occurred trying create the socket" ENDL);
             break;
+        case ERR_INVALID:
+            pe("An invalid (not corrupt) fountain was send to the program");
+            break;
         default:
             return 0;
     }

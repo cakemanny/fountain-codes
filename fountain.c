@@ -293,6 +293,9 @@ static bool const true = 1;
 
 static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
         blockread_f bread, blockwrite_f bwrite) {
+    if (ftn->num_blocks <= 0) // Could be a glitch
+        return ERR_INVALID;
+
     bool retest = false;
     char* blkdec = state->blkdecoded;
     packethold_s* hold = state->hold;

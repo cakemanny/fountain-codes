@@ -161,16 +161,16 @@ int main(int argc, char** argv) {
 
     // TODO check that this truncate is available in mingw
     // Think we need to do open() then ftruncate(fd) or chsize(fd)
-#ifdef _WIN32
-    int fd = open(outfilename, O_RDONLY);
-    if (fd >= 0 && ftruncate(fd, file_info.filesize) >= 0) {
-        close(fd);
-    } else
-        log_err("Failed to truncate the output file");
-#else
-    if (truncate(outfilename, file_info.filesize) < 0)
-        log_err("Failed to truncate the output file");
-#endif // _WIN32
+    #ifdef _WIN32
+        int fd = open(outfilename, O_RDWR | O_APPEND);
+        if (fd >= 0 && ftruncate(fd, file_info.filesize) >= 0) {
+            close(fd);
+        } else
+            log_err("Failed to truncate the output file");
+    #else
+        if (truncate(outfilename, file_info.filesize) < 0)
+            log_err("Failed to truncate the output file");
+    #endif // _WIN32
 
 shutdown:
     if (i_should_free_outfilename)
@@ -203,10 +203,10 @@ void close_connection() {
 
 static int send_msg(server_s server, char const * msg) {
     debug("About to send msg: %s", msg);
-    sendto(s, msg, strlen(msg), 0,
-            (struct sockaddr*)&server.address,
-            sizeof server.address); //FIXME - check return code
-    return 0;
+    int result = sendto(s, msg, strlen(msg), 0,
+                        (struct sockaddr*)&server.address,
+                        sizeof server.address);
+    return (result < 0) ? result : 0;
 }
 
 static int recv_msg(char* buf, size_t buf_len) {
@@ -221,8 +221,10 @@ static int recv_msg(char* buf, size_t buf_len) {
         bytes_recvd = recvfrom(s, buf, buf_len, 0,
                         (struct sockaddr*)&remote_addr,
                         &remote_addr_size);
-        if (bytes_recvd < 0)
+        if (bytes_recvd < 0) {
+            log_err("Error reading from network");
             return ERR_NETWORK;
+        }
 
         debug("Received %d bytes from %s",
                 bytes_recvd, inet_ntoa(remote_addr.sin_addr));
@@ -237,7 +239,7 @@ static int recv_msg(char* buf, size_t buf_len) {
 }
 
 int get_remote_file_info(file_info_s* file_info) {
-    send_msg(curr_server, MSG_INFO ENDL);
+    send_msg(curr_server, MSG_INFO ENDL); // FIXME check result and handle
     char buf[BUF_LEN];
     int bytes_recvd = recv_msg(buf, BUF_LEN);
     if (bytes_recvd < 0) return -1;
@@ -264,9 +266,37 @@ static void ftn_cache_alloc(ftn_cache_s* cache) {
     cache->current = cache->base;
 }
 
-static void load_from_network(ftn_cache_s* cache) {
-    send_msg(curr_server, MSG_WAITING ENDL);
+static void handle_pollevents(struct pollfd* pfd) {
+    if (pfd->revents & POLLERR)
+        log_err("POLLERR: An error has occurred");
+    if (pfd->revents & POLLHUP)
+        log_err("POLLHUP: A stream-oriented connection was either disconnected or aborted.");
+    if (pfd->revents & POLLNVAL)
+        log_err("POLLNVAL: Invalid socket");
+}
 
+static void load_from_network(ftn_cache_s* cache) {
+
+    struct pollfd pfd = {
+        .fd = s,
+        .events = POLLIN,
+        .revents = 0
+    };
+
+    int pollret1 = poll(&pfd, 1, 0);
+    if (pollret1 < 0) {
+        log_err("Error when waiting to receive packets");
+        return;
+    }
+    if (pollret1 > 0 && !(POLLIN & pfd.revents)) {
+        handle_pollevents(&pfd);
+        return;
+    }
+    if (pollret1 == 0)
+        send_msg(curr_server, MSG_WAITING ENDL);
+
+    static const int max_timeout = 15000;
+    int timeout = 10;
 
     // we need to do these either 750 times or... have a timeout
     // we might also want to adjust our yield expectation depending
@@ -274,10 +304,38 @@ static void load_from_network(ftn_cache_s* cache) {
     //
     // TODO Next important task, work out how to switch between filling the
     // cache when there are packets and decoding when there aren't
-    for (int i = 0; i < 200; i++) {
+    for (int i = 0; i < cache->capacity; ) {
+        int pollret = poll(&pfd, 1, timeout);
+        if (pollret == 0 && cache->size > 0) {
+            if (cache->size > 0) {
+                debug("Waited too long - time to decode instead");
+                break;
+            } else {
+                if (timeout / 2 >= max_timeout) {
+                    log_err("Timed out after %.00lf seconds",
+                            (double)max_timeout / 1000.0);
+                    return;
+                }
+                send_msg(curr_server, MSG_WAITING ENDL);
+                timeout <<= 1;
+                continue;
+            }
+        } else if (pollret < 0) {
+            log_err("Error when waiting for network activity");
+            cache->size = 0;
+            return;
+        } else if (!(POLLIN & pfd.revents)) {
+            log_err("Some networky problem...");
+            handle_pollevents(&pfd);
+            cache->size = 0;
+            return;
+        }
+
         int bytes_recvd = recv_msg(netbuf, netbuf_len);
-        if (bytes_recvd < 0)
+        if (bytes_recvd < 0) {
             handle_error(bytes_recvd, NULL);
+            return;
+        }
 
         buffer_s packet = {
             .length = bytes_recvd,
@@ -290,10 +348,9 @@ static void load_from_network(ftn_cache_s* cache) {
             // i, but that may end the program if we get too many bad packets.
             // Both are unlikely. May have to consider using some sort of
             // error code instead
-            --i;
             continue;
         }
-        cache->base[i] = ftn;
+        cache->base[i++] = ftn;
         cache->size++;
         debug("Cache size is now %d", cache->size);
     }

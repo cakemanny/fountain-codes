@@ -1,6 +1,9 @@
 SHELL = /bin/sh
 .SUFFIXES:
 
+PLATFORM=$(shell uname)
+ARCH=$(shell uname -m)
+
 # Basically we want to use gcc with c11 semantics
 ifndef CC
 CC=gcc -std=gnu11
@@ -12,22 +15,29 @@ endif
 
 # We will rarely want a release build so only when release is defined
 ifdef RELEASE
-#CFLAGS=-DNDEBUG -Wall -c -O3 -fms-extensions -march=native -Wa,-q -mavx2
-CFLAGS=-DNDEBUG -Wall -c -O3 -fms-extensions -march=corei7 -Wa,-q -mavx2
-LDFLAGS=-flto -lm
+CFLAGS=-DNDEBUG -Wall -c -O3 -fms-extensions
+
+ifeq "$(PLATFORM)" "Darwin"
+CFLAGS+=-march=corei7 -Wa,-q -mavx2
 else
+CFLAGS+=-march=native
+endif # Platform
+
+LDFLAGS=-flto
+
+else # Not RELEASE
 CFLAGS=-g -Wall -c -O0 -fms-extensions
-LDFLAGS=-lm
-endif
+LDFLAGS=
+endif # End RELEASE-IF
 
 ifdef PROFILE
 CFLAGS=-pg -Wall -c -O0 -fms-extensions
-LDFLAGS=-pg -lm
+LDFLAGS=-pg
 endif
 
-LDLIBS=
+LDLIBS=-lm
 ifeq "$(OS)" "Windows_NT"
-LDLIBS=-lws2_32
+LDLIBS+=-lws2_32
 endif
 
 # Define a function for adding .exe
