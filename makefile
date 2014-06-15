@@ -14,15 +14,15 @@ endif
 ifdef RELEASE
 #CFLAGS=-DNDEBUG -Wall -c -O3 -fms-extensions -march=native -Wa,-q -mavx2
 CFLAGS=-DNDEBUG -Wall -c -O3 -fms-extensions -march=corei7 -Wa,-q -mavx2
-LDFLAGS=-flto
+LDFLAGS=-flto -lm
 else
 CFLAGS=-g -Wall -c -O0 -fms-extensions
-LDFLAGS=
+LDFLAGS=-lm
 endif
 
 ifdef PROFILE
 CFLAGS=-pg -Wall -c -O0 -fms-extensions
-LDFLAGS=-pg
+LDFLAGS=-pg -lm
 endif
 
 LDLIBS=
