@@ -36,11 +36,33 @@ static int size_in_blocks(const char* string, int blk_size) {
 /*
  * param n = filesize in blocks
  */
-static int choose_num_blocks(const int n) {
+static int choose_num_blocks_x2(const int n) {
     // Effectively uniform random double between 0 and 1
     double x = (double)rand() / (double)RAND_MAX;
     // Distribute to make smaller blocks more common
     double d = (double)n * x * x;
+    return (int) ceil(d);
+}
+
+/*
+ * param n = filesize in blocks
+ */
+static int choose_num_blocks_erf(const int n) {
+    // Effectively uniform random double between 0 and 1
+    double x = (double)rand() / (double)RAND_MAX;
+    // Distribute to make smaller blocks more common
+    double d = (double)n * (1. + erf(6.*x - 3.)) / 2.;
+    return (int) ceil(d);
+}
+
+/*
+ * param n = filesize in blocks
+ */
+static int choose_num_blocks(const int n) {
+    // Effectively uniform random double between 0 and 1
+    double x = (double)rand() / (double)RAND_MAX;
+    // Distribute to make smaller blocks more common
+    double d = (double)n * (x <= 0.5 ? x*x*x : 1 - x*x*x);
     return (int) ceil(d);
 }
 
