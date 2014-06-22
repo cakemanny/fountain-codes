@@ -21,7 +21,7 @@
 #include "fountainprotocol.h" // msg definitions
 
 #define LISTEN_PORT 2534
-#define LISTEN_IP "127.0.0.1"
+#define LISTEN_IP "0.0.0.0"
 #define ENDL "\r\n" /* For network we always want to use CRLF */
 #define BUF_LEN 512
 #define BURST_SIZE 1000
@@ -95,7 +95,7 @@ static void print_usage_and_exit(int status) {
   -b, --blocksize=BYTES     manually set the blocksize in bytes\n\
   -h, --help                display this help message\n\
   -i, --ip=IPADDRESS        set the ip address to listen on, the default is \n\
-                              127.0.0.1\n\
+                              0.0.0.0\n\
   -p, --port=PORT           set the UDP port to listen on, default is 2534\n\
 ", out);
     exit(status);

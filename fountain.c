@@ -70,12 +70,11 @@ static int int_compare(const void* a, const void* b) {
     return ( *(int*)a - *(int*)b );
 }
 
-/* This is going to replace the above shortly
- *
+/*
  * param n filesize in blocks
  * param d number of blocks in fountain/packet
  */
-static int* seeded_select_blocks(int n, int d, unsigned long seed) {
+static int* seeded_select_blocks(int n, int d, uint64_t seed) {
 
     int* blocks = malloc(d * sizeof *blocks);
     if (!blocks) return NULL;
@@ -221,7 +220,7 @@ cleanup:
 }
 
 void print_fountain(const fountain_s * ftn) {
-    printf("{ num_blocks: %d, blk_size: %d, seed: %lu, blocks: ",
+    printf("{ num_blocks: %d, blk_size: %d, seed: %llu, blocks: ",
             ftn->num_blocks, ftn->blk_size, ftn->seed);
     for (int i = 0; i < ftn->num_blocks; i++) {
         printf("%d ", ftn->block[i]);
@@ -545,7 +544,7 @@ static uint16_t Fletcher16(uint8_t const * data, int count)
 
 static int fountain_packet_size(fountain_s* ftn) {
     return sizeof(uint16_t) // Make space for the checksum
-        + sizeof *ftn
+        + FTN_HEADER_SIZE
         + ftn->blk_size;
     // don't transfer the block list
 }
@@ -563,12 +562,8 @@ buffer_s pack_fountain(fountain_s* ftn) {
     // reference the memory after the checksum for convenience
     void* packed_ftn = buf_start + sizeof checksum;
 
-    memcpy(packed_ftn, ftn, sizeof *ftn);
-    memcpy(packed_ftn + sizeof *ftn, ftn->string, ftn->blk_size);
-
-    fountain_s* f_ptr = (fountain_s*) packed_ftn;
-    f_ptr->string = packed_ftn + sizeof *ftn;
-    f_ptr->block = 0;
+    memcpy(packed_ftn, ftn, FTN_HEADER_SIZE);
+    memcpy(packed_ftn + FTN_HEADER_SIZE, ftn->string, ftn->blk_size);
 
     // now we can calculate and fill in the hole at the beginning
     checksum = Fletcher16(packed_ftn, packet_size - sizeof checksum);
@@ -600,12 +595,12 @@ fountain_s* unpack_fountain(buffer_s packet, int filesize_in_blocks) {
 
     fountain_s* ftn = malloc(sizeof *ftn);
     if (!ftn)  return NULL;
-    memcpy(ftn, packed_ftn, sizeof *ftn);
+    memcpy(ftn, packed_ftn, FTN_HEADER_SIZE);
 
 
     ftn->string = malloc(ftn->blk_size);
     if (!ftn->string) goto free_fountain;
-    memcpy(ftn->string, packed_ftn + sizeof *ftn, ftn->blk_size);
+    memcpy(ftn->string, packed_ftn + FTN_HEADER_SIZE, ftn->blk_size);
 
     ftn->block = seeded_select_blocks(
             filesize_in_blocks, ftn->num_blocks, ftn->seed);

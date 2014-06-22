@@ -46,7 +46,6 @@ static void close_connection();
 static fountain_s* from_network();
 static int get_remote_file_info(struct file_info_s*);
 
-// TODO: test use of long options on windows
 struct option long_options[] = {
     { "help",   no_argument,        NULL, 'h' },
     { "ip",     required_argument,  NULL, 'i' },
@@ -66,7 +65,7 @@ static server_s curr_server = {};
 static char * outfilename = NULL;
 
 // The buffer for our pulling packets off the network
-static char* netbuf;
+static char* netbuf = NULL;
 static int netbuf_len;
 
 static int filesize_in_blocks = 0;
@@ -120,6 +119,12 @@ int main(int argc, char** argv) {
         return handle_error(ERR_CONNECTION, NULL);
     }
 
+    int recvbuf_size = 0;
+    socklen_t recvbuf_size_size = 0;
+    if (getsockopt(s, SOL_SOCKET, SO_RCVBUF, &recvbuf_size, &recvbuf_size_size) == 0) {
+        debug("Current recv buffer size is %d bytes", recvbuf_size);
+    }
+
     server_s server = { .address={
         .sin_family = AF_INET,
         .sin_port   = htons(port),
@@ -159,8 +164,6 @@ int main(int argc, char** argv) {
     // do { get some packets, try to decode } while ( not decoded )
     proc_file(from_network, &file_info);
 
-    // TODO check that this truncate is available in mingw
-    // Think we need to do open() then ftruncate(fd) or chsize(fd)
     #ifdef _WIN32
         int fd = open(outfilename, O_RDWR | O_APPEND);
         if (fd >= 0 && ftruncate(fd, file_info.filesize) >= 0) {
@@ -175,7 +178,8 @@ int main(int argc, char** argv) {
 shutdown:
     if (i_should_free_outfilename)
         free(outfilename);
-    free(netbuf);
+    if (netbuf)
+        free(netbuf);
     close_connection();
 }
 
@@ -306,7 +310,7 @@ static void load_from_network(ftn_cache_s* cache) {
     // cache when there are packets and decoding when there aren't
     for (int i = 0; i < cache->capacity; ) {
         int pollret = poll(&pfd, 1, timeout);
-        if (pollret == 0 && cache->size > 0) {
+        if (pollret == 0) {
             if (cache->size > 0) {
                 debug("Waited too long - time to decode instead");
                 break;

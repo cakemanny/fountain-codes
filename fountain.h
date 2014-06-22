@@ -2,17 +2,23 @@
 #define __FOUNTAIN_H__
 
 #include <stdio.h> // FILE
+#include <stdint.h>
 #include "errors.h"
 
-/* Structure definitions */
+/* ------ Structure definitions ------ */
 
 typedef struct fountain_s {
-    char* string;
-    int num_blocks;
+    int32_t num_blocks;
+    int32_t blk_size;
+    uint64_t seed;
     int* block; // they start from block 0 -- TODO rename this blocks
-    int blk_size;
-    unsigned long seed;
+    char* string;
 } fountain_s;
+
+/* We don't want to send the pointers across the network as they will have
+ * different sizes on different systems
+ */
+#define FTN_HEADER_SIZE (2 * sizeof(int32_t) + sizeof(uint64_t))
 
 typedef struct packethold_s {
     int num_packets;
