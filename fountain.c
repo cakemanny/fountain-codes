@@ -232,7 +232,7 @@ static int fountain_issubset(const fountain_s* sub, const fountain_s* super) {
     // We use the fact that the block list is ordered to create
     // a faster check O(n)
     int j = 0;
-    for (int i = 0; i < super->num_blocks; i++) {
+    for (int i = 0; i < super->num_blocks && j < sub->num_blocks; i++) {
         if (super->block[i] == sub->block[j])
             j++;
     }
@@ -253,8 +253,8 @@ static void reduce_fountain(const fountain_s* sub, fountain_s* super) {
     int new_num_blocks = super->num_blocks - sub->num_blocks;
     int new_blocks[new_num_blocks];
 
-    for (int i = 0, j = 0, k = 0; i < super->num_blocks; i++) {
-        if (super->block[i] == sub->block[j])
+    for (int i = 0, j = 0, k = 0, jmax = sub->num_blocks; i < super->num_blocks; i++) {
+        if (j != jmax && super->block[i] == sub->block[j])
             j++;
         else
             new_blocks[k++] = super->block[i];
