@@ -90,7 +90,7 @@ static int proc_file(fountain_src ftn_src) {
         if (result < 0) goto cleanup;
     } while (!decodestate_is_decoded(state));
 
-    odebug("%d", state->packets_so_far);
+    log_info("Total number of packets: %d", state->packets_so_far);
 
 cleanup:
     fclose(state->fp);
@@ -112,6 +112,9 @@ int main(int argc, char** argv) {
                 break;
             case 'b':
                 blk_size = atoi(optarg);
+                break;
+            case '?':
+                exit(1);
                 break;
         }
     }

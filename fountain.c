@@ -228,15 +228,33 @@ void print_fountain(const fountain_s * ftn) {
     printf("}\n");
 }
 
-static int fountain_issubset(const fountain_s* sub, const fountain_s* super) {
-    // We use the fact that the block list is ordered to create
-    // a faster check O(n)
-    int j = 0;
-    for (int i = 0; i < super->num_blocks && j < sub->num_blocks; i++) {
-        if (super->block[i] == sub->block[j])
-            j++;
+static int int_binary_search(int* a, int from, int to, int key) {
+    int low = from;
+    int high = to;
+
+    while (low <= high) {
+        int mid = (low + high) >> 1;
+        int midVal = a[mid];
+
+        if (midVal < key)
+            low = mid + 1;
+        else if (midVal > key)
+            high = mid - 1;
+        else
+            return mid;  // key found
     }
-    return (j == sub->num_blocks);
+    return -(low + 1);
+}
+
+static int fountain_issubset(const fountain_s* sub, const fountain_s* super) {
+    // A fast implementation based on a small number of shortcutting
+    // binary searches
+    int from = 0;
+    int to = super->num_blocks;
+    for (int i = 0; i < sub->num_blocks && from >= 0; i++) {
+        from = int_binary_search(super->block, from, to, sub->block[i]);
+    }
+    return (from >= 0);
 }
 
 /*
@@ -336,42 +354,41 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
             }
 
             // Part two check against blocks in hold
-            bool match = false;
             for (int i = 0; i < hold->num_packets; i++) {
-                for (int j = 0; j < hold->fountain[i].num_blocks; j++) {
-                    if (hold->fountain[i].block[j] == ftn->block[0]) {
-                        // Xor out the hold block
-                        xorncpy(hold->fountain[i].string, ftn->string, blk_size);
+                fountain_s* hold_ftn = hold->fountain + i;
 
-                        // Remove removed blk number
-                        for (int k = i; k < hold->fountain[i].num_blocks-1; k++) {
-                            hold->fountain[i].block[k] =
-                                hold->fountain[i].block[k+1];
-                        }
-                        int k = hold->fountain[i].num_blocks - 1;
-                        hold->fountain[i].block[k] = 0;
-                        hold->fountain[i].num_blocks--;
-                        match = true;
-                        break;
+                int j = int_binary_search(hold_ftn->block, 0, hold_ftn->num_blocks,
+                                            ftn->block[0]);
+                if (j >= 0) {
+                    // Xor out the hold block
+                    xorncpy(hold_ftn->string, ftn->string, blk_size);
+
+                    // Remove removed blk number
+                    for (int k = j; k < hold_ftn->num_blocks-1; k++) {
+                        hold_ftn->block[k] = hold_ftn->block[k + 1];
                     }
-                }
-                if (!match) continue;
-                // On success check if hold packet is of size one block
-                if (hold->fountain[i].num_blocks == 1) {
-                    // move into output if we don't already have it
-                    fountain_s* tmp_ftn = packethold_remove(hold, i);
-                    if (!tmp_ftn) return ERR_MEM;
-                    if (blkdec[tmp_ftn->block[0]] == 0) { /* not yet decoded so
-                                                            write to file */
-                        if (bwrite(tmp_ftn->string,
-                                tmp_ftn->block[0],
-                                state) != 1) {
-                            free_fountain(tmp_ftn);
-                            return ERR_BWRITE;
+                    int k = hold_ftn->num_blocks - 1;
+                    hold_ftn->block[k] = 0;
+                    hold_ftn->num_blocks--;
+
+                    // On success check if hold packet is of size one block
+                    if (hold_ftn->num_blocks == 1) {
+                        // move into output if we don't already have it
+                        fountain_s* tmp_ftn = packethold_remove(hold, i);
+                        if (!tmp_ftn) return ERR_MEM;
+                        if (blkdec[tmp_ftn->block[0]] == 0) { /* not yet decoded so
+                                                                write to file */
+                            if (bwrite(tmp_ftn->string,
+                                    tmp_ftn->block[0],
+                                    state) != 1) {
+                                free_fountain(tmp_ftn);
+                                return ERR_BWRITE;
+                            }
+                            blkdec[tmp_ftn->block[0]] = 1;
                         }
-                        blkdec[tmp_ftn->block[0]] = 1;
+                        free_fountain(tmp_ftn);
+                        i--; // Since i now points to the next item on
                     }
-                    free_fountain(tmp_ftn);
                 }
             }
         } else { /* size > 1, check against solved blocks */
@@ -424,9 +441,9 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                                 blkdec[tmp_ftn->block[0]] = 1;
                             }
                             free_fountain(tmp_ftn);
-
-                        }
-                        CLEARBIT(hold->mark, i);
+                            i--; /* Now points to the next item */
+                        } else // Only if not removed
+                            CLEARBIT(hold->mark, i);
                     }
                 }
             }
