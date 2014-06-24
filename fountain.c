@@ -243,7 +243,7 @@ static int fountain_issubset(const fountain_s* sub, const fountain_s* super) {
  * param sub the subset fountain used to reduce
  * param super the fountain to be reduced
  */
-static int reduce_fountain(const fountain_s* sub, fountain_s* super) {
+static void reduce_fountain(const fountain_s* sub, fountain_s* super) {
     // Here do the reduction
     // 1. xorncpy smaller into larger
     // 2. reallocate the actual block numbers
@@ -279,8 +279,7 @@ static int reduce_against_hold(packethold_s* hold, fountain_s* ftn) {
         if (from_hold->num_blocks > ftn->num_blocks) {
             // Check if ftn is a subset of from_hold
             if (fountain_issubset(ftn, from_hold)) {
-                if (reduce_fountain(ftn, from_hold) < 0)
-                    return ERR_MEM;
+                reduce_fountain(ftn, from_hold);
 
                 SETBIT(hold->mark, i); // Mark the packet hold for retest after
             }
@@ -289,8 +288,7 @@ static int reduce_against_hold(packethold_s* hold, fountain_s* ftn) {
             if (fountain_issubset(from_hold, ftn)) {
                 // Here reduce the ftn using the hold item, then send for a
                 // retest
-                if (reduce_fountain(from_hold, ftn) < 0)
-                    return ERR_MEM;
+                reduce_fountain(from_hold, ftn);
 
                 return 500; // RETEST -- need to define this
             }
@@ -403,7 +401,6 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
             if (!retest) {
                 odebug("%d", ftn->num_blocks);
                 int result = reduce_against_hold(hold, ftn);
-                if (result < 0) return result;
                 if (result) {
                     retest = true;
                     odebug("%d after", ftn->num_blocks);
@@ -659,8 +656,8 @@ fountain_s* packethold_remove(packethold_s* hold, int pos) {
     char* mark = hold->mark;
     for (int j = pos; j < hold->num_packets - 1; j++) {
         hold->fountain[j] = hold->fountain[j+1];
-        if (ISBITSET(mark, j)) SETBIT(mark, j + 1);
-        else CLEARBIT(mark, j + 1);
+        if (ISBITSET(mark, j + 1)) SETBIT(mark, j);
+        else CLEARBIT(mark, j);
     }
     memset(hold->fountain + hold->offset - 1, 0, sizeof *hold->fountain);
     CLEARBIT(mark, hold->num_packets);
