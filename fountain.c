@@ -11,7 +11,7 @@
 #include "dbg.h"
 #include "randgen.h"
 
-#define ISBITSET(x, i) (( (x)[i>>3] & (1<<((i)&7)) ) != 0)
+#define ISBITSET(x, i) (( (x)[(i)>>3] & (1<<((i)&7)) ) != 0)
 #define SETBIT(x, i) (x)[(i)>>3] |= (1<<((i)&7))
 #define CLEARBIT(x, i) (x)[(i)>>3] &= (1<<((i)&7)) ^ 0xFF
 
@@ -263,7 +263,6 @@ static void reduce_fountain(const fountain_s* sub, fountain_s* super) {
 
     memcpy(super->block, new_blocks, new_num_blocks * sizeof(int));
     super->num_blocks = new_num_blocks;
-    return 0;
 }
 
 // This function can possibly be used instead of the 'Part 2' part for
