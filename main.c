@@ -60,7 +60,7 @@ static fountain_s* from_file() {
 }
 
 static fountain_s* from_mem() {
-    return make_fountain(meminput, blk_size);
+    return make_fountain(meminput, blk_size, strlen(meminput));
 }
 
 static int proc_file(fountain_src ftn_src) {

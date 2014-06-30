@@ -47,10 +47,17 @@ typedef struct memdecodestate_s {
     char * result;
 } memdecodestate_s;
 
+extern char* memdecodestate_filename;
+
 /* Function declarations */
 
 /* ============ fountain_s functions  ====================================== */
-fountain_s* make_fountain(const char* string, int blk_size); /* allocs memory */
+/*
+ * param string The block of memory to make the fountain from
+ * param blk_size The block size of the fountain
+ * param length The length of the block of memory
+ */
+fountain_s* make_fountain(const char* string, int blk_size, size_t length); /* allocs memory */
 fountain_s* fmake_fountain(FILE* f, int blk_size); /* allocs memory */
 void free_fountain(fountain_s* ftn);
 int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2);
@@ -97,7 +104,7 @@ fountain_s* unpack_fountain(buffer_s packet, int filesize_in_blocks);
 /* ============ packethold_s functions  ==================================== */
 packethold_s* packethold_new(); /* allocs memory */
 void packethold_free(packethold_s* hold);
-fountain_s* packethold_remove(packethold_s* hold, int pos); /* allocs memory*/
+fountain_s* packethold_remove(packethold_s* hold, int pos, fountain_s* output); /* allocs memory*/
 
 /* adds a fountain to the end of the hold, making full copy so the orig can
    be freed later if so desired.

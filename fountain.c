@@ -17,6 +17,12 @@
 
 #define BUFFER_SIZE 256
 
+#define MAX_BLOCK_SIZE 4096
+static char fmake_buf[MAX_BLOCK_SIZE];
+
+char* memdecodestate_filename = "__memory__fountain__";
+
+
 static char * xorncpy (char* destination, const char* source, register size_t n) {
     register char* d = destination;
     register const char* s = source;
@@ -27,32 +33,9 @@ static char * xorncpy (char* destination, const char* source, register size_t n)
 }
 
 
-static int size_in_blocks(const char* string, int blk_size) {
-    int string_len = strlen(string);
+static int size_in_blocks(int string_len, int blk_size) {
     return (string_len % blk_size)
         ? (string_len / blk_size) + 1 : string_len / blk_size;
-}
-
-/*
- * param n = filesize in blocks
- */
-static int choose_num_blocks_x2(const int n) {
-    // Effectively uniform random double between 0 and 1
-    double x = (double)rand() / (double)RAND_MAX;
-    // Distribute to make smaller blocks more common
-    double d = (double)n * x * x;
-    return (int) ceil(d);
-}
-
-/*
- * param n = filesize in blocks
- */
-static int choose_num_blocks_erf(const int n) {
-    // Effectively uniform random double between 0 and 1
-    double x = (double)rand() / (double)RAND_MAX;
-    // Distribute to make smaller blocks more common
-    double d = (double)n * (1. + erf(6.*x - 3.)) / 2.;
-    return (int) ceil(d);
 }
 
 /*
@@ -121,8 +104,13 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
     output->string = calloc(blk_size + 1, sizeof *output->string);
     if (!output->string) goto free_ob;
 
-    char * buffer = malloc(blk_size);
-    if (!buffer) goto free_os;
+    // Only allocate if we actually need to
+    char * buffer;
+    if (blk_size <= MAX_BLOCK_SIZE) {
+         buffer = malloc(blk_size);
+        if (!buffer) goto free_os;
+    } else
+        buffer = fmake_buf;
 
     for (int i = 0; i < output->num_blocks; i++) {
         int m = output->block[i] * blk_size;
@@ -132,7 +120,7 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
     }
 
     // Cleanup
-    free(buffer);
+    if (blk_size <= MAX_BLOCK_SIZE) free(buffer);
 
     return output;
 
@@ -143,12 +131,12 @@ free_ftn:
     return NULL;
 }
 
-fountain_s* make_fountain(const char* string, int blk_size) {
+fountain_s* make_fountain(const char* string, int blk_size, size_t length) {
     fountain_s* output = malloc(sizeof *output);
     if (output == NULL) return NULL;
 
     memset(output, 0, sizeof *output);
-    int n = size_in_blocks(string, blk_size);
+    int n = size_in_blocks(length, blk_size);
     output->blk_size = blk_size;
 
     output->num_blocks = choose_num_blocks(n);
@@ -158,7 +146,7 @@ fountain_s* make_fountain(const char* string, int blk_size) {
         goto free_ob;
 
     // XOR blocks together
-    output->string = calloc(blk_size+1, sizeof *output->string);
+    output->string = calloc(blk_size + 1, sizeof *output->string);
     if (!output->string) goto free_os;
 
     for (int i = 0; i < output->num_blocks; i++) {
@@ -364,7 +352,7 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                     xorncpy(hold_ftn->string, ftn->string, blk_size);
 
                     // Remove removed blk number
-                    for (int k = j; k < hold_ftn->num_blocks-1; k++) {
+                    for (int k = j; k < hold_ftn->num_blocks - 1; k++) {
                         hold_ftn->block[k] = hold_ftn->block[k + 1];
                     }
                     int k = hold_ftn->num_blocks - 1;
@@ -374,19 +362,18 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                     // On success check if hold packet is of size one block
                     if (hold_ftn->num_blocks == 1) {
                         // move into output if we don't already have it
-                        fountain_s* tmp_ftn = packethold_remove(hold, i);
+                        fountain_s ltmp_ftn, *tmp_ftn;
+                        tmp_ftn = packethold_remove(hold, i, &ltmp_ftn);
                         if (!tmp_ftn) return ERR_MEM;
                         if (blkdec[tmp_ftn->block[0]] == 0) { /* not yet decoded so
                                                                 write to file */
                             if (bwrite(tmp_ftn->string,
                                     tmp_ftn->block[0],
                                     state) != 1) {
-                                free_fountain(tmp_ftn);
                                 return ERR_BWRITE;
                             }
                             blkdec[tmp_ftn->block[0]] = 1;
                         }
-                        free_fountain(tmp_ftn);
                         i--; // Since i now points to the next item on
                     }
                 }
@@ -428,19 +415,18 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                         // TODO factor this out as a function
                         if (hold->fountain[i].num_blocks == 1) {
                             // move into output if we don't already have it
-                            fountain_s* tmp_ftn = packethold_remove(hold, i);
+                            fountain_s ltmp_ftn, *tmp_ftn;
+                            tmp_ftn = packethold_remove(hold, i, &ltmp_ftn);
                             if (!tmp_ftn) return ERR_MEM;
                             if (blkdec[tmp_ftn->block[0]] == 0) { /* not yet decoded so
                                                                     write to file */
                                 if (bwrite(tmp_ftn->string,
                                         tmp_ftn->block[0],
                                         state) != 1) {
-                                    free_fountain(tmp_ftn);
                                     return ERR_BWRITE;
                                 }
                                 blkdec[tmp_ftn->block[0]] = 1;
                             }
-                            free_fountain(tmp_ftn);
                             i--; /* Now points to the next item */
                         } else // Only if not removed
                             CLEARBIT(hold->mark, i);
@@ -484,7 +470,7 @@ int fdecode_fountain(decodestate_s* state, fountain_s* ftn) {
 }
 
 static int sblockread(void* buffer, int block, decodestate_s* state) {
-   if (strcmp(state->filename, "__memory__fountain__") == 0) {
+   if (state->filename == memdecodestate_filename) {
        memdecodestate_s* mstate = (memdecodestate_s*) state;
        memcpy(buffer, mstate->result + (block * state->blk_size), state->blk_size);
        return 1;
@@ -493,7 +479,7 @@ static int sblockread(void* buffer, int block, decodestate_s* state) {
 }
 
 static int sblockwrite(void * buffer, int block, decodestate_s* state) {
-   if (strcmp(state->filename, "__memory__fountain__") == 0) {
+   if (state->filename == memdecodestate_filename) {
        memdecodestate_s* mstate = (memdecodestate_s*) state;
        memcpy(mstate->result + (block * state->blk_size), buffer, state->blk_size);
        return 1;
@@ -504,7 +490,8 @@ static int sblockwrite(void * buffer, int block, decodestate_s* state) {
 char* decode_fountain(const char* string, int blk_size) {
     int result = 0;
 
-    int num_blocks = size_in_blocks(string, blk_size);
+    int length = strlen(string);
+    int num_blocks = size_in_blocks(length, blk_size);
     decodestate_s* state = decodestate_new(blk_size, num_blocks);
     if (!state) return NULL;
 
@@ -519,11 +506,11 @@ char* decode_fountain(const char* string, int blk_size) {
 
     ((memdecodestate_s*)state)->result = output;
 
-    state->filename = "__memory__fountain__";
+    state->filename = memdecodestate_filename;
 
     fountain_s* ftn = NULL;
     do {
-        ftn = make_fountain(string, blk_size);
+        ftn = make_fountain(string, blk_size, length);
         if (!ftn) goto cleanup;
         state->packets_so_far += 1;
         result = _decode_fountain(state, ftn, &sblockread, &sblockwrite);
@@ -664,9 +651,7 @@ void packethold_free(packethold_s* hold) {
 }
 
 /* Remove the ith item from the hold and return a copy of it */
-fountain_s* packethold_remove(packethold_s* hold, int pos) {
-    fountain_s* output = malloc(sizeof *output);
-    if (!output) return NULL;
+fountain_s* packethold_remove(packethold_s* hold, int pos, fountain_s* output) {
     *output = hold->fountain[pos];
 
     char* mark = hold->mark;
@@ -730,8 +715,14 @@ int packethold_add(packethold_s* hold, fountain_s* ftn) {
         hold->num_slots = space;
     }
 
-    if (fountain_copy(&hold->fountain[hold->offset++], ftn) < 0)
-        return ERR_MEM;
+    //if (fountain_copy(&hold->fountain[hold->offset++], ftn) < 0)
+    //    return ERR_MEM;
+    // Shallow copy and null out the pointers since this is always the last
+    // thing to happen before returning the packet
+    hold->fountain[hold->offset++] = *ftn;
+    ftn->string = NULL;
+    ftn->block = NULL;
+
     CLEARBIT(hold->mark, hold->num_packets);
     hold->num_packets++;
     return 0;
