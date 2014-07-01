@@ -218,7 +218,7 @@ void print_fountain(const fountain_s * ftn) {
 
 static int int_binary_search(int* a, int from, int to, int key) {
     int low = from;
-    int high = to;
+    int high = to - 1;
 
     while (low <= high) {
         int mid = (low + high) >> 1;
@@ -370,9 +370,13 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                             if (bwrite(tmp_ftn->string,
                                     tmp_ftn->block[0],
                                     state) != 1) {
+                                free(tmp_ftn->string);
+                                free(tmp_ftn->block);
                                 return ERR_BWRITE;
                             }
                             blkdec[tmp_ftn->block[0]] = 1;
+                            free(tmp_ftn->string);
+                            free(tmp_ftn->block);
                         }
                         i--; // Since i now points to the next item on
                     }
@@ -423,9 +427,13 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                                 if (bwrite(tmp_ftn->string,
                                         tmp_ftn->block[0],
                                         state) != 1) {
+                                    free(tmp_ftn->string);
+                                    free(tmp_ftn->block);
                                     return ERR_BWRITE;
                                 }
                                 blkdec[tmp_ftn->block[0]] = 1;
+                                free(tmp_ftn->string);
+                                free(tmp_ftn->block);
                             }
                             i--; /* Now points to the next item */
                         } else // Only if not removed
