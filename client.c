@@ -17,6 +17,7 @@
 #include "fountain.h"
 #include "dbg.h"
 #include "fountainprotocol.h" // msg definitions
+#include "mapping.h" // map_file unmap_file
 
 #define DEFAULT_PORT 2534
 #define DEFAULT_IP "127.0.0.1"
@@ -163,6 +164,8 @@ int main(int argc, char** argv) {
 
     // We will at some point need to truncate to a whole number of blocks
     // when we introduce memory mapped files into the equation
+    fclose(fopen(outfilename, "wb+"));
+    platform_truncate(outfilename, file_info.blk_size * file_info.num_blocks);
 
     filesize_in_blocks = file_info.num_blocks;
     // do { get some packets, try to decode } while ( not decoded )
@@ -400,17 +403,22 @@ int proc_file(fountain_src ftn_src, file_info_s* file_info) {
         decodestate_new(file_info->blk_size, file_info->num_blocks);
     if (!state) return handle_error(ERR_MEM, NULL);
 
-    state->filename = outfilename;
-    state->fp = fopen(outfilename, "wb+");
-    if (!state->fp) {
-        result = ERR_FOPEN; err_str = outfilename; goto free_state; }
+    decodestate_s* tmp_ptr;
+    tmp_ptr = realloc(state, sizeof(memdecodestate_s));
+    if (tmp_ptr) state = tmp_ptr; else goto free_state;
+
+    state->filename = memdecodestate_filename;
+    char* file_mapping = map_file(outfilename);
+    if (!file_mapping) goto free_state;
+
+    ((memdecodestate_s*)state)->result = file_mapping;
 
     fountain_s* ftn = NULL;
     do {
         ftn = ftn_src();
         if (!ftn) goto cleanup;
         state->packets_so_far++;
-        result = fdecode_fountain(state, ftn);
+        result = memdecode_fountain((memdecodestate_s*)state, ftn);
         free_fountain(ftn);
         if (result < 0) goto cleanup;
     } while (!decodestate_is_decoded(state));
@@ -418,7 +426,7 @@ int proc_file(fountain_src ftn_src, file_info_s* file_info) {
     log_info("Total packets required for download: %d", state->packets_so_far);
 
 cleanup:
-    fclose(state->fp);
+    if (file_mapping) unmap_file(file_mapping);
 free_state:
     decodestate_free(state);
     return handle_error(result, err_str);

@@ -490,6 +490,9 @@ static int sblockwrite(void * buffer, int block, decodestate_s* state) {
    } else
        return -1;
 }
+int memdecode_fountain(memdecodestate_s* state, fountain_s* ftn) {
+    return _decode_fountain((decodestate_s*)state, ftn, &sblockread, &sblockwrite);
+}
 
 char* decode_fountain(const char* string, int blk_size) {
     int result = 0;

@@ -75,6 +75,9 @@ void print_fountain(const fountain_s * ftn);
 #endif
 int fdecode_fountain(decodestate_s* state, fountain_s* ftn);
 
+/* same as fdecode_fountain but more memdecodestate_s's */
+int memdecode_fountain(memdecodestate_s* state, fountain_s* ftn);
+
 /* returns 0 on success
    returns ERR_MEM if mem allocation occurs for creating the pointed to
            elements.
