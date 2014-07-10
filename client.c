@@ -45,6 +45,7 @@ static int create_connection();
 static void close_connection();
 static fountain_s* from_network();
 static int get_remote_file_info(struct file_info_s*);
+static void platform_truncate(const char* filename, int length);
 
 struct option long_options[] = {
     { "help",   no_argument,        NULL, 'h' },
@@ -160,20 +161,14 @@ int main(int argc, char** argv) {
         i_should_free_outfilename = 1;
     }
 
+    // We will at some point need to truncate to a whole number of blocks
+    // when we introduce memory mapped files into the equation
+
     filesize_in_blocks = file_info.num_blocks;
     // do { get some packets, try to decode } while ( not decoded )
     proc_file(from_network, &file_info);
 
-    #ifdef _WIN32
-        int fd = open(outfilename, O_RDWR | O_APPEND);
-        if (fd >= 0 && ftruncate(fd, file_info.filesize) >= 0) {
-            close(fd);
-        } else
-            log_err("Failed to truncate the output file");
-    #else
-        if (truncate(outfilename, file_info.filesize) < 0)
-            log_err("Failed to truncate the output file");
-    #endif // _WIN32
+    platform_truncate(outfilename, file_info.filesize);
 
 shutdown:
     if (i_should_free_outfilename)
@@ -181,6 +176,19 @@ shutdown:
     if (netbuf)
         free(netbuf);
     close_connection();
+}
+
+void platform_truncate(const char* filename, int length) {
+    #ifdef _WIN32
+        int fd = open(filename, O_RDWR | O_APPEND);
+        if (fd >= 0 && ftruncate(fd, length) >= 0) {
+            close(fd);
+        } else
+            log_err("Failed to truncate the output file");
+    #else
+        if (truncate(filename, length) < 0)
+            log_err("Failed to truncate the output file");
+    #endif // _WIN32
 }
 
 int create_connection() {
@@ -274,7 +282,8 @@ static void handle_pollevents(struct pollfd* pfd) {
     if (pfd->revents & POLLERR)
         log_err("POLLERR: An error has occurred");
     if (pfd->revents & POLLHUP)
-        log_err("POLLHUP: A stream-oriented connection was either disconnected or aborted.");
+        log_err("POLLHUP: A stream-oriented connection was either "
+                "disconnected or aborted.");
     if (pfd->revents & POLLNVAL)
         log_err("POLLNVAL: Invalid socket");
 }

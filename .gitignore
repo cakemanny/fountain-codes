@@ -6,7 +6,11 @@
 # Editor files
 *.swp
 
+# ctags tag file
 tags
+# Our output binaries
 client
 fountain
 server
+# those dSYM directories that valgrind likes
+*.dSYM/

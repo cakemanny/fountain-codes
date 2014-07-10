@@ -5,6 +5,7 @@
 #include <time.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <math.h>
 #include "errors.h"
 #include "fountain.h"
@@ -89,8 +90,7 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
     // get filesize
     fseek(f, 0, SEEK_END);
     int filesize = ftell(f);
-    int n = (filesize % blk_size)
-        ? (filesize /blk_size) + 1 : filesize / blk_size;
+    int n = size_in_blocks(filesize, blk_size);
     output->blk_size = blk_size;
 
     output->num_blocks = choose_num_blocks(n);
@@ -311,10 +311,6 @@ typedef int (*blockwrite_f)(void* /*buffer*/,
                             int /*blk_num*/,
                             decodestate_s* /*state*/);
 
-typedef int bool;
-static bool const false = 0;
-static bool const true = 1;
-
 static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
         blockread_f bread, blockwrite_f bwrite) {
     if (ftn->num_blocks <= 0) // Could be a glitch
@@ -527,7 +523,8 @@ char* decode_fountain(const char* string, int blk_size) {
     } while (!decodestate_is_decoded(state));
 
     decodestate_free(state);
-    output = realloc(output, strlen(string) + 1);
+    output = realloc(output, length + 1);
+    output[length] = '\0';
     return output;
 
 cleanup:
