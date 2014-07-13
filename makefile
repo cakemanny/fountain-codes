@@ -33,6 +33,10 @@ ifdef PROFILE
   LDFLAGS=-pg
 endif
 
+ifeq "clang" "$(findstring clang,$(CC))"
+  CFLAGS+=-Wdocumentation
+endif
+
 LDLIBS=-lm
 ifeq "$(OS)" "Windows_NT"
   LDLIBS+=-lws2_32

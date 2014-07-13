@@ -23,12 +23,12 @@ typedef struct fountain_s {
 typedef struct packethold_s {
     int num_packets;
     int num_slots;
-    fountain_s * fountain; /* an array of held packets */
+    fountain_s * fountain; /**< an array of held packets */
     size_t offset;
     char* mark; /* bitset for mark algorithm */
 } packethold_s;
 
-/* This is the strcuture we keep the state of our decoding in */
+/** This is the structure we keep the state of our decoding in. */
 typedef struct decodestate_s {
     int blk_size;
     int num_blocks;
@@ -52,10 +52,11 @@ extern char* memdecodestate_filename;
 /* Function declarations */
 
 /* ============ fountain_s functions  ====================================== */
-/*
- * param string The block of memory to make the fountain from
- * param blk_size The block size of the fountain
- * param length The length of the block of memory
+/**
+ * \param string The block of memory to make the fountain from
+ * \param blk_size The block size of the fountain
+ * \param length The length of the block of memory
+ * \returns pointer to a new fountain_s
  */
 fountain_s* make_fountain(const char* string, int blk_size, size_t length); /* allocs memory */
 fountain_s* fmake_fountain(FILE* f, int blk_size); /* allocs memory */
@@ -64,11 +65,12 @@ int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2);
 char* decode_fountain(const char* string, int blk_size);
 void print_fountain(const fountain_s * ftn);
 
-/* trys to decode the given fountain, it will write output to the file.
-   returns 0 on success
-   returns ALLOC_ERR if a memory allocation error occurs
-   returns F_ALREADY_DECODED so, just for our records, we already have decoded
-           this block.
+/**
+ * Trys to decode the given fountain, it will write output to the file.
+ * \returns 0 on success
+ *          ALLOC_ERR if a memory allocation error occurs
+ *          F_ALREADY_DECODED so, just for our records, we already have decoded
+ *          this block.
  */
 #ifndef F_ALREADY_DECODED
 #   define F_ALREADY_DECODED 1
