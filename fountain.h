@@ -40,7 +40,7 @@ typedef struct decodestate_s {
 } decodestate_s;
 
 typedef struct memdecodestate_s {
-    union {
+    union { // TODO Stop using anon union/struct to silence clang warning
         struct decodestate_s;
         decodestate_s state;
     };

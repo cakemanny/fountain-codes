@@ -7,8 +7,8 @@ ARCH=$(shell uname -m)
 # Basically we want to use gcc with c11 semantics
 ifndef CC
   CC=gcc -std=gnu11
-else ifeq (,$(findstring gcc,$(CC)))
-  CC=gcc -std=gnu11
+#else ifeq (,$(findstring gcc,$(CC)))
+#  CC=gcc -std=gnu11
 else ifeq (,$(findstring std,$(CC)))
   CC += -std=gnu11
 endif
@@ -16,12 +16,19 @@ endif
 # We will rarely want a release build so only when release is defined
 ifdef RELEASE
   CFLAGS=-DNDEBUG -Wall -c -O3 -fms-extensions -march=native
+  LDFLAGS=
 
   ifeq "$(PLATFORM)" "Darwin"
-    CFLAGS+=-Wa,-q -mno-avx2 -mno-avx -mno-bmi2 # -mavx2
+    #want to include -flto if using clang rather than gcc TODO lookup make &&
+    ifeq "clang" "$(findstring clang,$(CC))"
+      CC+= -flto -Wno-microsoft # TODO look at removing use of the anon union
+    else
+      CFLAGS+=-Wa,-q # clang gives warning using this argument
+      LDFLAGS+=-fwhole-program
+    endif
+  else
+    CC+=-flto -fuse-linker-plugin #lto-wrapper ignores our -Wa,-q
   endif # Platform
-
-  LDFLAGS=-flto
 
 else # Not RELEASE
   CFLAGS=-g -Wall -c -O0 -fms-extensions
@@ -33,6 +40,7 @@ ifdef PROFILE
   LDFLAGS=-pg
 endif
 
+# Use the doxygen checking feature if using clang
 ifeq "clang" "$(findstring clang,$(CC))"
   CFLAGS+=-Wdocumentation
 endif
@@ -64,7 +72,7 @@ $(call wino,client): client.o fountain.o errors.o mapping.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 %.o: %.c
-	$(CC) $(CFLAGS) $(LDFLAGS) $<
+	$(CC) $(CFLAGS) $<
 
 .PHONY: clean
 
