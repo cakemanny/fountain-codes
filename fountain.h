@@ -13,6 +13,8 @@ typedef struct fountain_s {
     uint64_t seed;
     int* block; // they start from block 0 -- TODO rename this blocks
     char* string;
+    size_t block_set_len;
+    uint32_t* block_set; // Use bitset on receiving end
 } fountain_s;
 
 /* We don't want to send the pointers across the network as they will have

@@ -60,7 +60,17 @@ endif
 TARGETS := fountain server client
 TARGETS := $(foreach target,$(TARGETS),$(call wino,$(target)))
 
+TEST_TARGETS := fountain_test
+TEST_TARGETS := $(foreach target,$(TEST_TARGETS),$(call wino,$(target)))
+
 all: $(TARGETS)
+
+tests: $(TEST_TARGETS)
+
+tests: CFLAGS+= -DUNIT_TESTS
+
+test: tests
+	./fountain_test
 
 $(call wino,fountain): main.o fountain.o errors.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
@@ -71,11 +81,14 @@ $(call wino,server): server.o fountain.o errors.o
 $(call wino,client): client.o fountain.o errors.o mapping.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
+$(call wino,fountain_test): fountain.o errors.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
 %.o: %.c
 	$(CC) $(CFLAGS) $<
 
 .PHONY: clean
 
 clean:
-	rm -f *.o $(TARGETS)
+	rm -f *.o $(TARGETS) $(TEST_TARGETS)
 
