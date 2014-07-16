@@ -12,6 +12,14 @@
 #include "dbg.h"
 #include "randgen.h"
 
+#if !defined(__clang__) && !defined(__has_builtin)
+#   if defined(__GNUC__)
+#       define __has_builtin(x) 1
+#   else
+#       define __has_builtin(x) 0
+#   endif
+#endif
+
 #define ISBITSET(x, i) (( (x)[(i)>>3] & (1<<((i)&7)) ) != 0)
 #define SETBIT(x, i) (x)[(i)>>3] |= (1<<((i)&7))
 #define CLEARBIT(x, i) (x)[(i)>>3] &= (1<<((i)&7)) ^ 0xFF
@@ -20,11 +28,6 @@
 #define IsBitSet(x, i) (( (x)[(i)>>5] & (1<<((i)&31)) ) != 0)
 #define SetBit(x, i) (x)[(i)>>5] |= (1<<((i)&31))
 #define ClearBit(x, i) (x)[(i)>>5] &= (1<<((i)&31)) ^ 0xFFFFFFFF
-
-/* Int-based bitset? Use uint64_t */
-#define IsBitSet64(x, i) (( (x)[(i)>>6] & (1<<((i)&63)) ) != 0)
-#define SetBit64(x, i) (x)[(i)>>6] |= (1<<((i)&63))
-#define ClearBit64(x, i) (x)[(i)>>6] &= (1<<((i)&63)) ^ 0xFFFFFFFFFFFFFFFF
 
 #define BUFFER_SIZE 256
 
@@ -43,6 +46,7 @@ static char * xorncpy (char* destination, const char* source, register size_t n)
     return (destination);
 }
 
+#if !__has_builtin(__builtin_ctz) /* We only use these if we don't has ffs */
 static const char LogTable256[256] =
 {
 #define LT(n) n, n, n, n, n, n, n, n, n, n, n, n, n, n, n, n
@@ -60,6 +64,7 @@ static unsigned int log2i(unsigned int v) { // 32-bit word to find the log of
         return (t = v >> 8) ? 8 + LogTable256[t] : LogTable256[v];
     }
 }
+#endif /*__builtin_ctz*/
 
 static int size_in_blocks(int string_len, int blk_size) {
     return (string_len % blk_size)
@@ -75,10 +80,6 @@ static int choose_num_blocks(const int n) {
     // Distribute to make smaller blocks more common
     double d = (double)n * (x <= 0.5 ? x*x*x : 1 - x*x*x);
     return (int) ceil(d);
-}
-
-static int int_compare(const void* a, const void* b) {
-    return ( *(int*)a - *(int*)b );
 }
 
 /*
@@ -100,17 +101,25 @@ static void seeded_select_blocks(int* blocks, int n, int d, uint64_t seed) {
             }
         }
     }
-    //qsort(blocks, d, sizeof *blocks, int_compare);
-
 }
 
-static uint32_t* create_blockset(int num_blocks, int* blocks, int filesize_in_blocks) {
-    const int d = num_blocks;
-    uint32_t* block_set = calloc((filesize_in_blocks/32 + 1), sizeof *block_set);
+/*
+ * Same as seeded_select_blocks but creates a bitset rather than an array of
+ * the block numbers
+ */
+static uint32_t* seeded_select_blockset(int* blocks, int n, int d, uint64_t seed) {
+    uint32_t* block_set = calloc((n/32 + 1), sizeof *block_set);
     check_mem(block_set);
 
     for (int i = 0; i < d; i++) {
-        SetBit(block_set, blocks[i]);
+        randgen_s gen = next_rand(seed);
+        seed = gen.next_seed;
+
+        int block_num = gen.result % n;
+        if (IsBitSet(block_set, block_num))
+            --i;
+        else
+            SetBit(block_set, block_num);
     }
     return block_set;
 error:
@@ -255,30 +264,43 @@ void print_fountain(const fountain_s * ftn) {
     printf("}\n");
 }
 
-static int int_binary_search(int* a, int from, int to, int key) {
-    int low = from;
-    int high = to - 1;
-
-    while (low <= high) {
-        int mid = (low + high) >> 1;
-        int midVal = a[mid];
-
-        if (midVal < key)
-            low = mid + 1;
-        else if (midVal > key)
-            high = mid - 1;
-        else
-            return mid;  // key found
-    }
-    return -(low + 1);
-}
-
 /* Helper Methods for working with block_set */
 // Assumes we know that there is exactly one bit set in the bitset
 static int blockset_single_block_num(uint32_t* block_set) {
     int i = 0;
     while (!block_set[i]) i++;
+#if __has_builtin(__builtin_ctz) /* Count-trailing-zeroes
+                                    Will yield same result for our input */
+    return i * 32 + __builtin_ctz(block_set[i]);
+#else
     return i * 32 + log2i(block_set[i]);
+#endif
+}
+
+/*
+ * finds the index of the next set bit starting from starting_index and
+ * including starting_index.
+ * This should give same result as while (!IsBitSet(block_set[j], j)) j++;
+ */
+static int blockset_lowest_set_above(uint32_t* block_set, int block_set_len, int starting_index) {
+    int j = starting_index;
+#if __has_builtin(__builtin_ctz)
+    int k = j>>5; // Index of integer to check
+    int x = 1<<(j&31);
+    int mask = x | ~(x - 1);
+    while (!(block_set[k] & mask) && k < block_set_len) {
+        k += 1;
+        j = k<<5;
+        mask = ~0;
+    }
+    return (k < block_set_len)
+        ? (j & ~31) + __builtin_ctz(block_set[k] & mask)
+        : -1;
+#else
+    while (!IsBitSet(block_set, j) && (j>>5) < block_set_len)
+        j++;
+    return (j<<5) < block_set_len ? j : -1;
+#endif
 }
 
 
@@ -322,44 +344,6 @@ static void reduce_fountain(const fountain_s* sub, fountain_s* super) {
     for (int i = 0; i < n; i++) {
         super->block_set[i] ^= sub->block_set[i];
     }
-}
-
-/* Creates a new fountain that is the result of reducing the two inputs
- * param sub the subset fountain used to reduce
- * param super the fountain to be reduced
- */
-static void create_reduction_fountain(fountain_s* result,
-        const fountain_s* sub, const fountain_s* super) {
-
-    memset(result, 0, sizeof *result);
-
-    result->num_blocks = super->num_blocks - sub->num_blocks;
-
-    result->blk_size = super->blk_size;
-    // Can't set result seed
-    result->block_set_len = super->block_set_len;
-
-    result->string = malloc(result->blk_size * sizeof *result->string);
-    check_mem(result->string);
-    result->block_set = malloc(result->block_set_len * sizeof *result->block_set);
-    check_mem(result->block_set);
-
-    // Construct the resultant string
-    memcpy(result->string, super->string, result->blk_size);
-    xorncpy(result->string, sub->string, result->blk_size);
-
-    // Construct the resultant block_set
-    const int n = result->block_set_len;
-    for (int i = 0; i < n; i++) {
-        result->block_set[i] = sub->block_set[i] ^ super->block_set[i];
-    }
-
-    return;
-
-error:
-    if (result->block_set) free(result->block_set);
-    if (result->string) free(result->string);
-    memset(result, 0, sizeof *result);
 }
 
 // This function can possibly be used instead of the 'Part 2' part for
@@ -460,8 +444,9 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
             }
         } else { /* size > 1, check against solved blocks */
             for (int i = 0, j = 0; i < ftn->num_blocks; i++) {
-                while (!IsBitSet(ftn->block_set, j))
-                    j++;
+                j = blockset_lowest_set_above(
+                        ftn->block_set, ftn->block_set_len, j);
+                if (j == -1) break;
                 if (blkdec[j]) {
                     // Xor the decoded block out of a new packet
                     char buf[blk_size];
@@ -691,10 +676,8 @@ fountain_s* unpack_fountain(buffer_s packet, int filesize_in_blocks) {
     if (!ftn->string) goto free_fountain;
     memcpy(ftn->string, packed_ftn + FTN_HEADER_SIZE, ftn->blk_size);
 
-    seeded_select_blocks(block_list,
+    ftn->block_set = seeded_select_blockset(block_list,
             filesize_in_blocks, ftn->num_blocks, ftn->seed);
-
-    ftn->block_set = create_blockset(ftn->num_blocks, block_list, filesize_in_blocks);
     if (!ftn->block_set) goto free_string;
     ftn->block_set_len = filesize_in_blocks/32 + 1;
 
@@ -901,36 +884,68 @@ int decodestate_is_decoded(decodestate_s* state) {
 int main(int argc, char** argv) {
 
     int i = 0;
-    bool passed = true;
 
-    printf("Testing SetBit and IsBitSet...\n");
-    for (i = 0; i < 4*32 && passed; i++) {
-        uint32_t bitset[5] = {};
-        SetBit(bitset, i);
-        if (!IsBitSet(bitset, i))
-            passed = false;
-        ClearBit(bitset, i);
-        if (IsBitSet(bitset, i))
-            passed = false;
+    {
+        bool passed = true;
+        printf("Testing SetBit and IsBitSet...\n");
+        for (i = 0; i < 4*32 && passed; i++) {
+            uint32_t bitset[5] = {};
+            SetBit(bitset, i);
+            if (!IsBitSet(bitset, i))
+                passed = false;
+            ClearBit(bitset, i);
+            if (IsBitSet(bitset, i))
+                passed = false;
+        }
+        if (passed)
+            printf("PASSED\n");
+        else
+            printf("FAILED: i = %d\n", i);
     }
-    if (passed)
-        printf("PASSED\n");
-    else
-        printf("FAILED: i = %d\n", i);
 
-    printf("Testing blockset_single_block_num...\n");
-    for (i = 0; i < 4*32 && passed; i++) {
-        uint32_t bitset[5] = {};
-        SetBit(bitset, i);
-        uint32_t block_num = blockset_single_block_num(bitset);
-        if (block_num != i)
-            passed = false;
-        ClearBit(bitset, i);
+    {
+        bool passed = true;
+        printf("Testing blockset_single_block_num...\n");
+        for (i = 0; i < 4*32 && passed; i++) {
+            uint32_t bitset[5] = {};
+            SetBit(bitset, i);
+            uint32_t block_num = blockset_single_block_num(bitset);
+            if (block_num != i)
+                passed = false;
+            ClearBit(bitset, i);
+        }
+        if (passed)
+            printf("PASSED\n");
+        else
+            printf("FAILED: i = %d\n", i);
     }
-    if (passed)
-        printf("PASSED\n");
-    else
-        printf("FAILED: i = %d\n", i);
+    {
+        bool passed = true;
+        int j = 0, expected = 0, actual = 0;
+        printf("Testing blockset_lowest_set_above...\n");
+        for (i = 0; i < 4*32 && passed; i+=7) {
+            for (j = 0; j < 4*32 && passed; j++) {
+                uint32_t bitset[5] = {};
+                SetBit(bitset, i);
+
+                expected = j;
+                while (!IsBitSet(bitset, expected) && expected < 4*32)
+                    expected++;
+                if (expected == 4 * 32) expected = -1;
+
+                actual = blockset_lowest_set_above(bitset, 5, j);
+                if (actual != expected)
+                    passed = false;
+
+                ClearBit(bitset, i);
+            }
+        }
+        if (passed)
+            printf("PASSED\n");
+        else
+            printf("FAILED: i = %d, j = %d, expected = %d, actual = %d\n",
+                    i, j, expected, actual);
+    }
 }
 #endif
 

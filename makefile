@@ -15,7 +15,7 @@ endif
 
 # We will rarely want a release build so only when release is defined
 ifdef RELEASE
-  CFLAGS=-DNDEBUG -Wall -c -O3 -fms-extensions -march=native
+  CFLAGS=-DNDEBUG -Wall -g -c -O3 -fms-extensions -march=native
   LDFLAGS=
 
   ifeq "$(PLATFORM)" "Darwin"
