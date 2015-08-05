@@ -106,6 +106,7 @@ static void seeded_select_blocks(int* blocks, int n, int d, uint64_t seed) {
 /*
  * Same as seeded_select_blocks but creates a bitset rather than an array of
  * the block numbers
+ * @param blocks Not used - TODO: remove parameter
  */
 static uint32_t* seeded_select_blockset(int* blocks, int n, int d, uint64_t seed) {
     uint32_t* block_set = calloc((n/32 + 1), sizeof *block_set);
@@ -190,16 +191,22 @@ fountain_s* make_fountain(const char* string, int blk_size, size_t length) {
 
     // XOR blocks together
     output->string = calloc(blk_size, sizeof *output->string);
-    if (!output->string) goto free_os;
+    if (!output->string) goto free_ftn;
 
     for (int i = 0; i < output->num_blocks; i++) {
         int m = block_list[i] * blk_size;
         xorncpy(output->string, string + m, blk_size);
     }
 
+    // We need to allocate the blockset for our local test version
+    output->block_set =
+        seeded_select_blockset(NULL, n, output->num_blocks, output->seed);
+    if (!output->block_set) goto free_ftn;
+    output->block_set_len = n/32 + 1;
+
     return output;
 
-free_os:
+free_ftn:
     free_fountain(output);
     return NULL;
 }
@@ -670,13 +677,11 @@ fountain_s* unpack_fountain(buffer_s packet, int filesize_in_blocks) {
     if (!ftn)  return NULL;
     memcpy(ftn, packed_ftn, FTN_HEADER_SIZE);
 
-    int block_list[ftn->num_blocks];
-
     ftn->string = malloc(ftn->blk_size);
     if (!ftn->string) goto free_fountain;
     memcpy(ftn->string, packed_ftn + FTN_HEADER_SIZE, ftn->blk_size);
 
-    ftn->block_set = seeded_select_blockset(block_list,
+    ftn->block_set = seeded_select_blockset(NULL,
             filesize_in_blocks, ftn->num_blocks, ftn->seed);
     if (!ftn->block_set) goto free_string;
     ftn->block_set_len = filesize_in_blocks/32 + 1;
