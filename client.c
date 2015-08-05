@@ -91,7 +91,7 @@ int main(int argc, char** argv) {
     /* deal with options */
     program_name = argv[0];
     int c;
-    while ( (c = getopt_long(argc, argv, "i:o:p:", long_options, NULL)) != -1 ) {
+    while ( (c = getopt_long(argc, argv, "hi:o:p:", long_options, NULL)) != -1 ) {
         switch (c) {
             case 'h':
                 print_usage_and_exit(0);
@@ -216,11 +216,15 @@ void close_connection() {
     #endif
 }
 
-static int send_msg(server_s server, char const * msg) {
-    debug("About to send msg: %s", msg);
-    int result = sendto(s, msg, strlen(msg), 0,
-                        (struct sockaddr*)&server.address,
-                        sizeof server.address);
+
+static int send_wait_signal(int capacity) {
+    wait_signal_s msg = {
+        .magic = MAGIC_WAITING,
+        .capacity = (int32_t)capacity
+    };
+    int result = sendto(s, (char*)&msg, sizeof(msg), 0,
+            (struct sockaddr*)&curr_server.address,
+            sizeof curr_server.address);
     return (result < 0) ? result : 0;
 }
 
@@ -253,8 +257,21 @@ static int recv_msg(char* buf, size_t buf_len) {
     return bytes_recvd;
 }
 
+static int send_file_info_request() {
+    info_request_s msg = {
+        .magic = MAGIC_REQUEST_INFO,
+    };
+    int result = sendto(s, (char*)&msg, sizeof(msg), 0,
+            (struct sockaddr*)&curr_server.address,
+            sizeof curr_server.address);
+    return (result < 0) ? result : 0;
+}
+
 int get_remote_file_info(file_info_s* file_info) {
-    send_msg(curr_server, MSG_INFO ENDL); // FIXME check result and handle
+    int result = send_file_info_request();
+    if (result < 0) return result;
+
+    // TODO: remove copy, receive straight into file_info
     char buf[BUF_LEN];
     int bytes_recvd = recv_msg(buf, BUF_LEN);
     if (bytes_recvd < 0) return -1;
@@ -308,8 +325,9 @@ static void load_from_network(ftn_cache_s* cache) {
         handle_pollevents(&pfd);
         return;
     }
-    if (pollret1 == 0)
-        send_msg(curr_server, MSG_WAITING ENDL);
+    if (pollret1 == 0) // TODO: Waiting message should say how much buffer is
+        // left to fill
+        send_wait_signal(cache->capacity - cache->size);
 
     static const int max_timeout = 15000;
     int timeout = 10;
@@ -332,7 +350,7 @@ static void load_from_network(ftn_cache_s* cache) {
                             (double)max_timeout / 1000.0);
                     return;
                 }
-                send_msg(curr_server, MSG_WAITING ENDL);
+                send_wait_signal(cache->capacity);
                 timeout <<= 1;
                 continue;
             }

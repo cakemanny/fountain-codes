@@ -5,43 +5,43 @@
 
   This is where we define the message syntax for protocol.
 */
+#include <stdint.h>
 
+typedef struct packet_s {
+    int32_t magic;
+    // More stuff below
+    //
+} packet_s;
+
+//
+// A request for info about the file being served
+#define MAGIC_REQUEST_INFO  ('R'<<24 | 'I'<<16 | 'N'<<8 | 'F')
+typedef struct info_request_s {
+    int32_t magic;
+    // Leave room to expand later
+} info_request_s;
+
+#define MAGIC_INFO  ('I'<<24 | 'N'<<16 | 'F'<<8 | 'O')
+//
+// The file information that is sent - TODO: switch to uniform size members
+// e.g. uint8_t, ..
+typedef struct file_info_s {
+    int32_t magic;          // Should always be MAGIC_INFO
+    int16_t blk_size;
+    int16_t num_blocks;
+    int32_t filesize;       // The actual size in bytes
+    char filename[256];
+} file_info_s;
 
 //
 // This is sent by the client when it would like to receive a burst
 // transmission from the server
-#define MSG_WAITING "FCWAITING"
+#define MAGIC_WAITING ('W'<<24 | 'A'<<16 | 'I'<<8 | 'T')
 
-//
-// Request for size of the file in the block size being used
-#define MSG_SIZE    "NUMBLOCKS"
-#define HDR_SIZE    "NUMBLOCKS "
+typedef struct wait_signal_s {
+    int32_t magic;
+    int32_t capacity;
+} wait_signal_s;
 
-//
-// Request for the block size
-#define MSG_BLKSIZE "BLOCKSIZE"
-#define HDR_BLKSIZE "BLOCKSIZE "
-
-//
-// Request for the filename
-#define MSG_FILENAME "FILENAME"
-#define HDR_FILENAME "FILENAME "
-
-//
-// A request for info about the file being served
-#define MSG_INFO    "FileInfo"
-#define MAGIC_INFO  54119
-
-#define MSG_FILESIZE    "FileSize"
-
-//
-// The file information that is sent
-typedef struct file_info_s {
-    int magic;          // Should always be MAGIC_INFO
-    int blk_size;
-    int num_blocks;
-    int filesize;       // The actual size in bytes
-    char filename[256];
-} file_info_s;
 
 #endif /* __FOUNTAINPROTOCOL_H__ */

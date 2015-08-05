@@ -36,13 +36,9 @@ typedef struct client_s {
 static int create_connection(const char* ip_address);
 static int recvd_hello(client_s * new_client);
 static void close_connection();
-static int send_filename(client_s client, const char * filename);
-static int send_std_msg(client_s client, char const * msg);
 static int send_fountain(client_s client, fountain_s* ftn);
 static int send_block_burst(client_s client, const char * filename);
 static int send_info(client_s client, const char * filename);
-static int send_size(client_s client, const char * filename);
-static int send_blk_size(client_s client, const char * filename);
 
 
 // Message lookup table
@@ -50,19 +46,16 @@ typedef int (*msg_despatch_f)(client_s /* client */,
                               const char * /* filename */);
 struct msg_lookup {
     int id;
-    const char *msg;
+    int32_t magic;
     msg_despatch_f despatcher;
 };
 
 static struct msg_lookup lookup_table[] =
 {
-    { 0, "" ,               NULL                },
-    { 1, MSG_WAITING ENDL,  send_block_burst    },
-    { 2, MSG_SIZE ENDL,     send_size           },
-    { 3, MSG_BLKSIZE ENDL,  send_blk_size       },
-    { 4, MSG_FILENAME ENDL, send_filename       },
-    { 5, MSG_INFO ENDL,     send_info           },
-    { 6, NULL,              NULL                }
+    { 0, 0,                  NULL                },
+    { 1, MAGIC_REQUEST_INFO, send_info           },
+    { 2, MAGIC_WAITING,      send_block_burst    },
+    { 3, -1,                 NULL                }
 };
 
 // TODO: test use of long options on windows
@@ -153,14 +146,13 @@ int main(int argc, char** argv) {
 
     client_s client;
 
-    int hello;
-    while ((hello = recvd_hello(&client)) >= 0) {
-        if (hello) {
-            debug("About to despatch for %s", lookup_table[hello].msg);
-            if ((error = lookup_table[hello].despatcher(client, filename)) < 0)
+    int request_type;
+    while ((request_type = recvd_hello(&client)) >= 0) {
+        if (request_type) {
+            if ((error = lookup_table[request_type].despatcher(client, filename)) < 0)
                 handle_error(error, NULL);
         } else {
-            log_info("Unknown msg code: %d", hello);
+            log_info("Unknown msg code: %d", request_type);
         }
     }
 
@@ -206,11 +198,13 @@ int recvd_hello(client_s * new_client) {
                 &remote_addr_size) < 0)
         return -1;
 
-    debug("Received msg: %s", buf);
+    char msg[5] = { buf[3], buf[2], buf[1], buf[0], '\0' };
+    debug("Received msg: %s", msg);
 
     // Lookup the message in the table
-    for (int i = 1; lookup_table[i].msg != NULL; i++) {
-        if (strcmp(buf, lookup_table[i].msg) == 0) {
+    packet_s* packet = (packet_s*)buf;
+    for (int i = 1; lookup_table[i].magic != -1; i++) {
+        if (packet->magic == lookup_table[i].magic) {
             new_client->address = remote_addr;
             return i;
         }
@@ -224,25 +218,6 @@ void close_connection() {
     #ifdef _WIN32
     WSACleanup();
     #endif
-}
-
-/* Send a message to a client, terminating in \r\n\r\n, rather than a file */
-
-int send_std_msg(client_s client, char const * msg) {
-    sendto(s, msg, strlen(msg), 0,
-            (struct sockaddr*)&client.address,
-            sizeof client.address);
-    return 0;
-}
-
-int send_filename(client_s client, const char * filename) {
-    debug("Sending filename: %s", filename);
-    char * msg;
-    if (asprintf(&msg, HDR_FILENAME "%s" ENDL, filename) < 0)
-        return ERR_MEM;
-    send_std_msg(client, msg);
-    free(msg);
-    return 0;
 }
 
 static int filesize_in_bytes(const char * filename) {
@@ -262,26 +237,7 @@ static int fsize_in_blocks (const char * filename) {
 }
 
 /* This is the size in blocks not the actual filesize we are sending... */
-int send_size(client_s client, const char * filename) {
-    char * msg;
-    int size = fsize_in_blocks(filename);
-    debug("Sending size: %d", size);
-    if (asprintf(&msg, HDR_SIZE "%d" ENDL, size) < 0)
-        return ERR_MEM;
-    send_std_msg(client, msg);
-    free(msg);
-    return 0;
-}
 
-int send_blk_size(client_s client, const char * filename) {
-    char * msg;
-    debug("Sending blk_size: %d", blk_size);
-    if (asprintf(&msg, HDR_BLKSIZE "%d" ENDL, blk_size) < 0)
-        return ERR_MEM;
-    send_std_msg(client, msg);
-    free(msg);
-    return 0;
-}
 
 int send_info(client_s client, const char * filename) {
     debug("Sending info for file %s", filename);
