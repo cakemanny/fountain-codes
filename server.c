@@ -34,35 +34,20 @@ typedef struct client_s {
 
 // ------ Forward declarations ------
 static int create_connection(const char* ip_address);
-static int recvd_hello(client_s * new_client);
+static int receive_request(client_s * new_client, const char * filename);
 static void close_connection();
-static int send_fountain(client_s client, fountain_s* ftn);
-static int send_block_burst(client_s client, const char * filename);
-static int send_info(client_s client, const char * filename);
+static int send_fountain(client_s * client, fountain_s* ftn);
+static int send_block_burst(client_s * client, const char * filename, int capacity);
+static int send_info(client_s * client, const char * filename);
 
 
-// Message lookup table
-typedef int (*msg_despatch_f)(client_s /* client */,
-                              const char * /* filename */);
-struct msg_lookup {
-    int id;
-    int32_t magic;
-    msg_despatch_f despatcher;
-};
-
-static struct msg_lookup lookup_table[] =
-{
-    { 0, 0,                  NULL                },
-    { 1, MAGIC_REQUEST_INFO, send_info           },
-    { 2, MAGIC_WAITING,      send_block_burst    },
-    { 3, -1,                 NULL                }
-};
 
 // TODO: test use of long options on windows
 struct option long_options[] = {
     { "blocksize",  required_argument, NULL, 'b' },
     { "help",       no_argument,       NULL, 'h' },
     { "ip",         required_argument, NULL, 'i' },
+    { "latency",    required_argument, NULL, 'L' },
     { "port",       required_argument, NULL, 'p' },
     { 0, 0, 0, 0 }
 };
@@ -77,6 +62,7 @@ static char* listen_ip = LISTEN_IP;
 static char const * program_name;
 static int blk_size = 128; /* better to set this based on filesize */
 
+static int dbg_add_response_latency = 0;
 
 // ------ functions ------
 static void print_usage_and_exit(int status) {
@@ -89,6 +75,7 @@ static void print_usage_and_exit(int status) {
   -h, --help                display this help message\n\
   -i, --ip=IPADDRESS        set the ip address to listen on, the default is \n\
                               0.0.0.0\n\
+  -L, --latency=LATENCY     debug setting: adds response latency to the server\n\
   -p, --port=PORT           set the UDP port to listen on, default is 2534\n\
 ", out);
     exit(status);
@@ -98,7 +85,7 @@ int main(int argc, char** argv) {
     /* deal with options */
     program_name = argv[0];
     int c;
-    while ( (c = getopt_long(argc, argv, "b:hi:p:", long_options, NULL)) != -1) {
+    while ( (c = getopt_long(argc, argv, "b:hi:L:p:", long_options, NULL)) != -1) {
         switch (c) {
             case 'b':
                 blk_size = atoi(optarg);
@@ -108,6 +95,9 @@ int main(int argc, char** argv) {
                 break;
             case 'i':
                 listen_ip = optarg;
+                break;
+            case 'L':
+                dbg_add_response_latency = atoi(optarg);
                 break;
             case 'p':
                 listen_port = atoi(optarg);
@@ -147,13 +137,8 @@ int main(int argc, char** argv) {
     client_s client;
 
     int request_type;
-    while ((request_type = recvd_hello(&client)) >= 0) {
-        if (request_type) {
-            if ((error = lookup_table[request_type].despatcher(client, filename)) < 0)
-                handle_error(error, NULL);
-        } else {
-            log_info("Unknown msg code: %d", request_type);
-        }
+    while ((request_type = receive_request(&client, filename)) >= 0) {
+        //
     }
 
     close_connection();
@@ -185,10 +170,23 @@ int create_connection(const char* ip_address) {
     return 0;
 }
 
+void close_connection() {
+    if (s)
+        closesocket(s);
+    #ifdef _WIN32
+    WSACleanup();
+    #endif
+}
+
+
+static void wait_signal_order_from_network(wait_signal_s* wait_signal) {
+    wait_signal->magic = htonl(wait_signal->magic);
+    wait_signal->capacity = htonl(wait_signal->capacity);
+}
 //
 // Translate the message sent to us
 
-int recvd_hello(client_s * new_client) {
+int receive_request(client_s * new_client, const char * filename) {
     char buf[BUF_LEN];
     struct sockaddr_in remote_addr;
     socklen_t remote_addr_size = sizeof remote_addr;
@@ -198,28 +196,43 @@ int recvd_hello(client_s * new_client) {
                 &remote_addr_size) < 0)
         return -1;
 
+    new_client->address = remote_addr;
+
     debug("Received msg: %s", buf);
+
+#ifndef NDEBUG
+    if (dbg_add_response_latency) {
+        debug("Sleeping for %d seconds...", dbg_add_response_latency);
+        sleep(dbg_add_response_latency);
+    }
+#endif
 
     // Lookup the message in the table
     packet_s* packet = (packet_s*)buf;
     int magic = ntohl(packet->magic);
-    // TODO: change to switch case
-    for (int i = 1; lookup_table[i].magic != -1; i++) {
-        if (magic == lookup_table[i].magic) {
-            new_client->address = remote_addr;
-            return i;
-        }
+
+    int error;
+
+    switch (magic) {
+        case MAGIC_REQUEST_INFO:
+            error = send_info(new_client, filename);
+            break;
+        case MAGIC_WAITING:
+            {
+                wait_signal_s* signal = (wait_signal_s*)buf;
+                wait_signal_order_from_network(signal);
+                error = send_block_burst( new_client, filename, signal->capacity);
+            }
+            break;
+        default:
+            return -1;
     }
+
+    if (error < 0)
+        handle_error(error, NULL);
     return 0;
 }
 
-void close_connection() {
-    if (s)
-        closesocket(s);
-    #ifdef _WIN32
-    WSACleanup();
-    #endif
-}
 
 static void file_info_order_for_network(file_info_s* info) {
     info->magic = htonl(info->magic);
@@ -247,7 +260,7 @@ static int fsize_in_blocks (const char * filename) {
 /* This is the size in blocks not the actual filesize we are sending... */
 
 
-int send_info(client_s client, const char * filename) {
+int send_info(client_s * client, const char * filename) {
     debug("Sending info for file %s", filename);
 
     file_info_s info = {
@@ -266,20 +279,20 @@ int send_info(client_s client, const char * filename) {
     file_info_order_for_network(&info);
 
     int bytes_sent = sendto(s, (char*)&info, sizeof info, 0,
-            (struct sockaddr*)&client.address,
-            sizeof client.address);
+            (struct sockaddr*)&client->address,
+            sizeof client->address);
 
     if (bytes_sent == SOCKET_ERROR) return SOCKET_ERROR;
     return 0;
 }
 
-int send_fountain(client_s client, fountain_s* ftn) {
+int send_fountain(client_s * client, fountain_s* ftn) {
     buffer_s packet = pack_fountain(ftn);
     if (packet.length == 0) return ERR_PACKING;
 
     int bytes_sent = sendto(s, packet.buffer, packet.length, 0,
-            (struct sockaddr*)&client.address,
-            sizeof client.address);
+            (struct sockaddr*)&client->address,
+            sizeof client->address);
 
     free(packet.buffer);
 
@@ -287,11 +300,10 @@ int send_fountain(client_s client, fountain_s* ftn) {
     return 0;
 }
 
-int send_block_burst(client_s client, const char * filename) {
-    //TODO: use the wait_signal_s->capacity instead of BURST_SIZE
+int send_block_burst(client_s * client, const char * filename, int capacity) {
     FILE* f = fopen(filename, "rb");
     if (!f) return ERR_FOPEN;
-    for (int i = 0; i < BURST_SIZE; i++) {
+    for (int i = 0; i < capacity; i++) {
         // make a fountain
         // send it across the air
         fountain_s* ftn = fmake_fountain(f, blk_size);
@@ -300,7 +312,7 @@ int send_block_burst(client_s client, const char * filename) {
         if (error < 0) handle_error(error, NULL);
         free_fountain(ftn);
     }
-    log_info("Sent packet burst of size %d", BURST_SIZE);
+    log_info("Sent packet burst of size %d", capacity);
 
     fclose(f);
     return 0;

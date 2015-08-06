@@ -40,7 +40,7 @@ typedef struct file_info_s {
 
 typedef struct wait_signal_s {
     int32_t magic;
-    int32_t capacity;
+    int32_t capacity; // This could probably be an int16_t ...
 } wait_signal_s;
 
 

@@ -219,9 +219,9 @@ void close_connection() {
 static void packet_order_for_network(packet_s* packet) {
     packet->magic = htonl(packet->magic);
 }
-static void packet_order_from_network(packet_s* packet) {
-    packet->magic = ntohl(packet->magic);
-}
+//static void packet_order_from_network(packet_s* packet) {
+//    packet->magic = ntohl(packet->magic);
+//}
 
 static void file_info_order_from_network(file_info_s* info) {
     info->magic = ntohl(info->magic);
@@ -241,6 +241,7 @@ static int send_wait_signal(int capacity) {
         .magic = MAGIC_WAITING,
         .capacity = (int32_t)capacity
     };
+    debug("Sending wait signal with capacity = %d", capacity);
     wait_signal_order_for_network(&msg);
     int result = sendto(s, (char*)&msg, sizeof(msg), 0,
             (struct sockaddr*)&curr_server.address,
