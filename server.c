@@ -198,13 +198,14 @@ int recvd_hello(client_s * new_client) {
                 &remote_addr_size) < 0)
         return -1;
 
-    char msg[5] = { buf[3], buf[2], buf[1], buf[0], '\0' };
-    debug("Received msg: %s", msg);
+    debug("Received msg: %s", buf);
 
     // Lookup the message in the table
     packet_s* packet = (packet_s*)buf;
+    int magic = ntohl(packet->magic);
+    // TODO: change to switch case
     for (int i = 1; lookup_table[i].magic != -1; i++) {
-        if (packet->magic == lookup_table[i].magic) {
+        if (magic == lookup_table[i].magic) {
             new_client->address = remote_addr;
             return i;
         }
@@ -218,6 +219,13 @@ void close_connection() {
     #ifdef _WIN32
     WSACleanup();
     #endif
+}
+
+static void file_info_order_for_network(file_info_s* info) {
+    info->magic = htonl(info->magic);
+    info->blk_size = htons(info->blk_size);
+    info->num_blocks = htons(info->num_blocks);
+    info->filesize = htonl(info->filesize);
 }
 
 static int filesize_in_bytes(const char * filename) {
@@ -254,6 +262,9 @@ int send_info(client_s client, const char * filename) {
     odebug("%d", info.blk_size);
     odebug("%d", info.num_blocks);
     odebug("%d", info.filesize);
+
+    file_info_order_for_network(&info);
+
     int bytes_sent = sendto(s, (char*)&info, sizeof info, 0,
             (struct sockaddr*)&client.address,
             sizeof client.address);
@@ -277,6 +288,7 @@ int send_fountain(client_s client, fountain_s* ftn) {
 }
 
 int send_block_burst(client_s client, const char * filename) {
+    //TODO: use the wait_signal_s->capacity instead of BURST_SIZE
     FILE* f = fopen(filename, "rb");
     if (!f) return ERR_FOPEN;
     for (int i = 0; i < BURST_SIZE; i++) {

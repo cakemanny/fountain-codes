@@ -216,12 +216,32 @@ void close_connection() {
     #endif
 }
 
+static void packet_order_for_network(packet_s* packet) {
+    packet->magic = htonl(packet->magic);
+}
+static void packet_order_from_network(packet_s* packet) {
+    packet->magic = ntohl(packet->magic);
+}
+
+static void file_info_order_from_network(file_info_s* info) {
+    info->magic = ntohl(info->magic);
+    info->blk_size = ntohs(info->blk_size);
+    info->num_blocks = ntohs(info->num_blocks);
+    info->filesize = ntohl(info->filesize);
+}
+
+static void wait_signal_order_for_network(wait_signal_s* wait_signal) {
+    wait_signal->magic = htonl(wait_signal->magic);
+    wait_signal->capacity = htonl(wait_signal->capacity);
+}
+
 
 static int send_wait_signal(int capacity) {
     wait_signal_s msg = {
         .magic = MAGIC_WAITING,
         .capacity = (int32_t)capacity
     };
+    wait_signal_order_for_network(&msg);
     int result = sendto(s, (char*)&msg, sizeof(msg), 0,
             (struct sockaddr*)&curr_server.address,
             sizeof curr_server.address);
@@ -261,6 +281,7 @@ static int send_file_info_request() {
     info_request_s msg = {
         .magic = MAGIC_REQUEST_INFO,
     };
+    packet_order_for_network((packet_s*)&msg);
     int result = sendto(s, (char*)&msg, sizeof(msg), 0,
             (struct sockaddr*)&curr_server.address,
             sizeof curr_server.address);
@@ -271,12 +292,16 @@ int get_remote_file_info(file_info_s* file_info) {
     int result = send_file_info_request();
     if (result < 0) return result;
 
-    // TODO: remove copy, receive straight into file_info
+    // TODO: remove copy, receive straight into file_info?
     char buf[BUF_LEN];
     int bytes_recvd = recv_msg(buf, BUF_LEN);
     if (bytes_recvd < 0) return -1;
     struct file_info_s* net_info = (struct file_info_s *) buf;
+    file_info_order_from_network(net_info);
     if (net_info->magic == MAGIC_INFO) {
+        // TODO: define max & min acceptable blocksizes and sanity check
+        // TODO: check
+        // blk_size * (num_blocks - 1) <= filesize <= blk_size * num_blocks ?
         if (net_info->blk_size < 0
                 || net_info->num_blocks < 0
                 || net_info->filesize < 0) {
