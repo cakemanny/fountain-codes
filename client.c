@@ -21,7 +21,6 @@
 
 #define DEFAULT_PORT 2534
 #define DEFAULT_IP "127.0.0.1"
-#define ENDL "\r\n"
 #define BUF_LEN 512 // 4 times the blksize -- should be ok
 #define BURST_SIZE 1000
 
@@ -76,7 +75,7 @@ static int filesize_in_blocks = 0;
 static void print_usage_and_exit(int status) {
     FILE* out = (status == 0) ? stdout : stderr;
 
-    fprintf(out, "Usage: %s [OPTION]... FILE\n", program_name);
+    fprintf(out, "Usage: %s [OPTION]...\n", program_name);
     fputs("\
 \n\
   -h, --help                display this help message\n\
@@ -271,6 +270,8 @@ static int recv_msg(char* buf, size_t buf_len) {
 
         /* Make sure that this is from the server we made the request to,
            otherwise ignore and try again */
+        /* We could eliminate this loop by connecting (even though it's a
+           UDP socket */
     } while (memcmp((void*)&remote_addr.sin_addr,
                 (void*)&curr_server.address.sin_addr,
                 sizeof remote_addr.sin_addr) != 0);
@@ -293,23 +294,19 @@ int get_remote_file_info(file_info_s* file_info) {
     int result = send_file_info_request();
     if (result < 0) return result;
 
-    // TODO: remove copy, receive straight into file_info?
-    char buf[BUF_LEN];
-    int bytes_recvd = recv_msg(buf, BUF_LEN);
+    int bytes_recvd = recv_msg((char*)file_info, sizeof *file_info);
     if (bytes_recvd < 0) return -1;
-    struct file_info_s* net_info = (struct file_info_s *) buf;
-    file_info_order_from_network(net_info);
-    if (net_info->magic == MAGIC_INFO) {
+    file_info_order_from_network(file_info);
+    if (file_info->magic == MAGIC_INFO) {
         // TODO: define max & min acceptable blocksizes and sanity check
         // TODO: check
         // blk_size * (num_blocks - 1) <= filesize <= blk_size * num_blocks ?
-        if (net_info->blk_size < 0
-                || net_info->num_blocks < 0
-                || net_info->filesize < 0) {
+        if (file_info->blk_size < 0
+                || file_info->num_blocks < 0
+                || file_info->filesize < 0) {
             log_err("Corrupt packet");
             return ERR_NETWORK;
         }
-        memcpy(file_info, net_info, sizeof *file_info);
         return 0;
     }
     log_err("Packet was not a fileinfo packet");
@@ -351,8 +348,7 @@ static void load_from_network(ftn_cache_s* cache) {
         handle_pollevents(&pfd);
         return;
     }
-    if (pollret1 == 0) // TODO: Waiting message should say how much buffer is
-        // left to fill
+    if (pollret1 == 0)
         send_wait_signal(cache->capacity - cache->size);
 
     static const int max_timeout = 15000;

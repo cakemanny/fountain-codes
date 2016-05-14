@@ -22,7 +22,6 @@
 
 #define LISTEN_PORT 2534
 #define LISTEN_IP "0.0.0.0"
-#define ENDL "\r\n" /* For network we always want to use CRLF */
 #define BUF_LEN 512
 #define BURST_SIZE 1000
 
@@ -132,7 +131,7 @@ int main(int argc, char** argv) {
         close_connection();
         return -1;
     }
-    printf("Listening on %s:%d ..." ENDL,listen_ip, listen_port);
+    printf("Listening on %s:%d ...\n" ,listen_ip, listen_port);
 
     client_s client;
 
@@ -201,6 +200,8 @@ int receive_request(client_s * new_client, const char * filename) {
     debug("Received msg: %s", buf);
 
 #ifndef NDEBUG
+    // This doesn't actually simulate latency
+    // Really we need a receive buffer
     if (dbg_add_response_latency) {
         debug("Sleeping for %d seconds...", dbg_add_response_latency);
         sleep(dbg_add_response_latency);
