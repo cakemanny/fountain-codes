@@ -46,6 +46,7 @@ static void close_connection();
 static fountain_s* from_network();
 static int get_remote_file_info(struct file_info_s*);
 static void platform_truncate(const char* filename, int length);
+static char* alloc_sanitize_path(const char* unsafepath);
 
 struct option long_options[] = {
     { "help",   no_argument,        NULL, 'h' },
@@ -157,7 +158,10 @@ int main(int argc, char** argv) {
     netbuf_len = to_alloc;
 
     if (!outfilename) {
-        outfilename = strdup(file_info.filename);
+        outfilename = alloc_sanitize_path(file_info.filename);
+        if (!outfilename)
+            goto shutdown;
+        debug("Sanitized path: %s", outfilename);
         i_should_free_outfilename = 1;
     }
 
@@ -168,7 +172,8 @@ int main(int argc, char** argv) {
 
     filesize_in_blocks = file_info.num_blocks;
     // do { get some packets, try to decode } while ( not decoded )
-    proc_file(from_network, &file_info);
+    if (proc_file(from_network, &file_info) < 0)
+        goto shutdown;
 
     platform_truncate(outfilename, file_info.filesize);
 
@@ -191,6 +196,70 @@ void platform_truncate(const char* filename, int length) {
         if (truncate(filename, length) < 0)
             log_err("Failed to truncate the output file");
     #endif // _WIN32
+}
+
+char* alloc_sanitize_path(const char* unsafepath)
+{
+    char* safepath = NULL;
+    /*
+     * We have to jail the path into the current folder to avoid a MITM from
+     * accessing the reset of the system
+     */
+    char* path = strdup(unsafepath);
+    check_mem(path);
+    char* sep = "/";
+
+    char* seg0[256] = {0};
+    char** cur_seg = seg0;
+    char** seg_end = seg0 + 256;
+
+    char* rest = NULL;
+    for (char* segment = strtok_r(path, sep, &rest);
+         segment;
+         segment = strtok_r(NULL, sep, &rest))
+    {
+        if (cur_seg == seg_end) {
+            log_err("too many path segments");
+            goto error;
+        }
+        if (segment[0] == '.') {
+            if (segment[1] == '\0') { /* current dir => skip */
+                continue;
+            }
+            if (segment[1] == '.' && segment[2] == '\0') {
+                /* parent dir => level up if not at root */
+                if (cur_seg != seg0)
+                    --cur_seg;
+                continue;
+            }
+        }
+        *cur_seg++ = segment; /* otherwise include in path array */
+    }
+
+    /*
+     * If we are on windows then we need to remove or check for path components
+     * which are not allowed in filenames: /\*>< ...
+     */
+#ifdef _WIN32
+    // TODO:
+#endif // _WIN32
+
+    /* the output path won't be longer that the input */
+    safepath = calloc(1 + strlen(unsafepath), sizeof *safepath);
+    check_mem(safepath);
+    char* sp = safepath;
+    for (char** p = seg0; p < cur_seg - 1; p++) {
+        /* don't need to use stpncopy because sum(len(seg0)) is shorter than
+           safepath by construction */
+        sp = stpcpy(sp, *p);
+        *sp++ = '/';
+    }
+    sp = stpcpy(sp, *(cur_seg - 1));
+
+error:
+    if (path) free(path);
+
+    return safepath;
 }
 
 int create_connection() {
@@ -445,11 +514,16 @@ int proc_file(fountain_src ftn_src, file_info_s* file_info) {
 
     decodestate_s* tmp_ptr;
     tmp_ptr = realloc(state, sizeof(memdecodestate_s));
-    if (tmp_ptr) state = tmp_ptr; else goto free_state;
+    if (tmp_ptr) state = tmp_ptr;
+    else { result = ERR_MEM; goto free_state; }
 
     state->filename = memdecodestate_filename;
     char* file_mapping = map_file(outfilename);
-    if (!file_mapping) goto free_state;
+    if (!file_mapping) {
+        result = ERR_MAP;
+        err_str = outfilename;
+        goto free_state;
+    }
 
     ((memdecodestate_s*)state)->result = file_mapping;
 

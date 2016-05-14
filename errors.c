@@ -43,6 +43,9 @@ int handle_error(int error_number, void* args) {
         case ERR_INVALID:
             pe("An invalid (not corrupt) fountain was send to the program");
             break;
+        case ERR_MAP:
+            pe("Couldn't map file %s" ENDL, fargs(args));
+            break;
         default:
             return 0;
     }
