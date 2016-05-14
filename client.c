@@ -12,6 +12,7 @@
 #ifdef _WIN32
 #   include <fcntl.h> // open -- the mingw unix open
 #   include "asprintf.h"
+#   include "stpcpy.h"
 #endif
 #include "errors.h"
 #include "fountain.h"
@@ -200,6 +201,21 @@ void platform_truncate(const char* filename, int length) {
 
 char* alloc_sanitize_path(const char* unsafepath)
 {
+#ifdef _WIN32
+    /*
+     * If we are on windows then we need to remove or check for path components
+     * which are not allowed in filenames: \/:*?<>|
+     */
+    /* Note that we consider \ to be illegal because it would have been
+     * converted into a / if server is running on windows
+     */
+    char illegal_chars[] = "\\:*?<>|";
+    if (strcspn(unsafepath, illegal_chars) != strlen(unsafepath)) {
+        log_err("Illegal characters in path: %s", unsafepath);
+        return NULL;
+    }
+#endif // _WIN32
+
     char* safepath = NULL;
     /*
      * We have to jail the path into the current folder to avoid a MITM from
@@ -235,14 +251,6 @@ char* alloc_sanitize_path(const char* unsafepath)
         }
         *cur_seg++ = segment; /* otherwise include in path array */
     }
-
-    /*
-     * If we are on windows then we need to remove or check for path components
-     * which are not allowed in filenames: /\*>< ...
-     */
-#ifdef _WIN32
-    // TODO:
-#endif // _WIN32
 
     /* the output path won't be longer that the input */
     safepath = calloc(1 + strlen(unsafepath), sizeof *safepath);
