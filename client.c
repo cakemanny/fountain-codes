@@ -21,7 +21,6 @@
 
 #define DEFAULT_PORT 2534
 #define DEFAULT_IP "127.0.0.1"
-#define ENDL "\r\n"
 #define BUF_LEN 512 // 4 times the blksize -- should be ok
 #define BURST_SIZE 1000
 
@@ -47,6 +46,7 @@ static void close_connection();
 static fountain_s* from_network();
 static int get_remote_file_info(struct file_info_s*);
 static void platform_truncate(const char* filename, int length);
+static char* alloc_sanitize_path(const char* unsafepath);
 
 struct option long_options[] = {
     { "help",   no_argument,        NULL, 'h' },
@@ -76,7 +76,7 @@ static int filesize_in_blocks = 0;
 static void print_usage_and_exit(int status) {
     FILE* out = (status == 0) ? stdout : stderr;
 
-    fprintf(out, "Usage: %s [OPTION]... FILE\n", program_name);
+    fprintf(out, "Usage: %s [OPTION]...\n", program_name);
     fputs("\
 \n\
   -h, --help                display this help message\n\
@@ -158,7 +158,10 @@ int main(int argc, char** argv) {
     netbuf_len = to_alloc;
 
     if (!outfilename) {
-        outfilename = strdup(file_info.filename);
+        outfilename = alloc_sanitize_path(file_info.filename);
+        if (!outfilename)
+            goto shutdown;
+        debug("Sanitized path: %s", outfilename);
         i_should_free_outfilename = 1;
     }
 
@@ -169,7 +172,8 @@ int main(int argc, char** argv) {
 
     filesize_in_blocks = file_info.num_blocks;
     // do { get some packets, try to decode } while ( not decoded )
-    proc_file(from_network, &file_info);
+    if (proc_file(from_network, &file_info) < 0)
+        goto shutdown;
 
     platform_truncate(outfilename, file_info.filesize);
 
@@ -192,6 +196,70 @@ void platform_truncate(const char* filename, int length) {
         if (truncate(filename, length) < 0)
             log_err("Failed to truncate the output file");
     #endif // _WIN32
+}
+
+char* alloc_sanitize_path(const char* unsafepath)
+{
+    char* safepath = NULL;
+    /*
+     * We have to jail the path into the current folder to avoid a MITM from
+     * accessing the reset of the system
+     */
+    char* path = strdup(unsafepath);
+    check_mem(path);
+    char* sep = "/";
+
+    char* seg0[256] = {0};
+    char** cur_seg = seg0;
+    char** seg_end = seg0 + 256;
+
+    char* rest = NULL;
+    for (char* segment = strtok_r(path, sep, &rest);
+         segment;
+         segment = strtok_r(NULL, sep, &rest))
+    {
+        if (cur_seg == seg_end) {
+            log_err("too many path segments");
+            goto error;
+        }
+        if (segment[0] == '.') {
+            if (segment[1] == '\0') { /* current dir => skip */
+                continue;
+            }
+            if (segment[1] == '.' && segment[2] == '\0') {
+                /* parent dir => level up if not at root */
+                if (cur_seg != seg0)
+                    --cur_seg;
+                continue;
+            }
+        }
+        *cur_seg++ = segment; /* otherwise include in path array */
+    }
+
+    /*
+     * If we are on windows then we need to remove or check for path components
+     * which are not allowed in filenames: /\*>< ...
+     */
+#ifdef _WIN32
+    // TODO:
+#endif // _WIN32
+
+    /* the output path won't be longer that the input */
+    safepath = calloc(1 + strlen(unsafepath), sizeof *safepath);
+    check_mem(safepath);
+    char* sp = safepath;
+    for (char** p = seg0; p < cur_seg - 1; p++) {
+        /* don't need to use stpncopy because sum(len(seg0)) is shorter than
+           safepath by construction */
+        sp = stpcpy(sp, *p);
+        *sp++ = '/';
+    }
+    sp = stpcpy(sp, *(cur_seg - 1));
+
+error:
+    if (path) free(path);
+
+    return safepath;
 }
 
 int create_connection() {
@@ -271,6 +339,8 @@ static int recv_msg(char* buf, size_t buf_len) {
 
         /* Make sure that this is from the server we made the request to,
            otherwise ignore and try again */
+        /* We could eliminate this loop by connecting (even though it's a
+           UDP socket */
     } while (memcmp((void*)&remote_addr.sin_addr,
                 (void*)&curr_server.address.sin_addr,
                 sizeof remote_addr.sin_addr) != 0);
@@ -293,23 +363,19 @@ int get_remote_file_info(file_info_s* file_info) {
     int result = send_file_info_request();
     if (result < 0) return result;
 
-    // TODO: remove copy, receive straight into file_info?
-    char buf[BUF_LEN];
-    int bytes_recvd = recv_msg(buf, BUF_LEN);
+    int bytes_recvd = recv_msg((char*)file_info, sizeof *file_info);
     if (bytes_recvd < 0) return -1;
-    struct file_info_s* net_info = (struct file_info_s *) buf;
-    file_info_order_from_network(net_info);
-    if (net_info->magic == MAGIC_INFO) {
+    file_info_order_from_network(file_info);
+    if (file_info->magic == MAGIC_INFO) {
         // TODO: define max & min acceptable blocksizes and sanity check
         // TODO: check
         // blk_size * (num_blocks - 1) <= filesize <= blk_size * num_blocks ?
-        if (net_info->blk_size < 0
-                || net_info->num_blocks < 0
-                || net_info->filesize < 0) {
+        if (file_info->blk_size < 0
+                || file_info->num_blocks < 0
+                || file_info->filesize < 0) {
             log_err("Corrupt packet");
             return ERR_NETWORK;
         }
-        memcpy(file_info, net_info, sizeof *file_info);
         return 0;
     }
     log_err("Packet was not a fileinfo packet");
@@ -351,8 +417,7 @@ static void load_from_network(ftn_cache_s* cache) {
         handle_pollevents(&pfd);
         return;
     }
-    if (pollret1 == 0) // TODO: Waiting message should say how much buffer is
-        // left to fill
+    if (pollret1 == 0)
         send_wait_signal(cache->capacity - cache->size);
 
     static const int max_timeout = 15000;
@@ -449,11 +514,16 @@ int proc_file(fountain_src ftn_src, file_info_s* file_info) {
 
     decodestate_s* tmp_ptr;
     tmp_ptr = realloc(state, sizeof(memdecodestate_s));
-    if (tmp_ptr) state = tmp_ptr; else goto free_state;
+    if (tmp_ptr) state = tmp_ptr;
+    else { result = ERR_MEM; goto free_state; }
 
     state->filename = memdecodestate_filename;
     char* file_mapping = map_file(outfilename);
-    if (!file_mapping) goto free_state;
+    if (!file_mapping) {
+        result = ERR_MAP;
+        err_str = outfilename;
+        goto free_state;
+    }
 
     ((memdecodestate_s*)state)->result = file_mapping;
 

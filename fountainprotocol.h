@@ -43,5 +43,7 @@ typedef struct wait_signal_s {
     int32_t capacity; // This could probably be an int16_t ...
 } wait_signal_s;
 
+#define fp_from(x)  x = _Generic((x), int16_t: ntohs(x), int32_t: ntohl(x))
+#define fp_to(x)  x = _Generic((x), int16_t: htons(x), int32_t: htonl(x))
 
 #endif /* __FOUNTAINPROTOCOL_H__ */
