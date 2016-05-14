@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
 
     int recvbuf_size = 0;
     socklen_t recvbuf_size_size = 0;
-    if (getsockopt(s, SOL_SOCKET, SO_RCVBUF, &recvbuf_size, &recvbuf_size_size) == 0) {
+    if (getsockopt(s, SOL_SOCKET, SO_RCVBUF, (char*)&recvbuf_size, &recvbuf_size_size) == 0) {
         debug("Current recv buffer size is %d bytes", recvbuf_size);
     }
 

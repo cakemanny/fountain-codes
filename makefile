@@ -7,6 +7,8 @@ ARCH=$(shell uname -m)
 # Basically we want to use gcc with c11 semantics
 ifndef CC
   CC=gcc -std=gnu11
+else ifeq "$(CC)" "cc"
+  CC=gcc -std=gnu11
 #else ifeq (,$(findstring gcc,$(CC)))
 #  CC=gcc -std=gnu11
 else ifeq (,$(findstring std,$(CC)))
