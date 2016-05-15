@@ -214,7 +214,7 @@ char* sanitize_path(const char* unsafepath)
      * converted into a / if server is running on windows
      */
     char illegal_chars[] = "\\:*?<>|";
-    if (strcspn(unsafepath, illegal_chars) != strlen(unsafepath)) {
+    if (strpbrk(unsafepath, illegal_chars) != NULL) {
         log_err("Illegal characters in path: %s", unsafepath);
         return NULL;
     }

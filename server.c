@@ -294,6 +294,13 @@ int send_info(client_s * client, const char * filename) {
     };
 
     strncpy(info.filename, filename, sizeof info.filename - 1);
+#ifdef _WIN32
+    /* Make the path cross platform by replacing \ path separator with / */
+    char* bs_pos = info.filename;
+    while ((bs_pos = strchr(bs_pos, '\\')) != NULL) {
+        *bs_pos++ = '/';
+    }
+#endif
 
     odebug("%"PRId16, info.blk_size);
     odebug("%"PRId16, info.num_blocks);
