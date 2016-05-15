@@ -5,9 +5,11 @@
 #include <time.h>
 #include <string.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <math.h>
 #include "errors.h"
+#include "platform.h"
 #include "fountain.h"
 #include "dbg.h"
 #include "randgen.h"
@@ -258,7 +260,7 @@ cleanup:
 }
 
 void print_fountain(const fountain_s * ftn) {
-    printf("{ num_blocks: %d, blk_size: %d, seed: %llu, blocks: ",
+    printf("{ num_blocks: %"PRId32", blk_size: %"PRId32", seed: %"PRIu64", blocks: ",
             ftn->num_blocks, ftn->blk_size, ftn->seed);
     if (ftn->block) {
         for (int i = 0; i < ftn->num_blocks; i++) {
@@ -750,7 +752,7 @@ fountain_s* packethold_remove(packethold_s* hold, int pos, fountain_s* output) {
     if (hold->num_slots > 2 * hold->offset && hold->num_slots > BUFFER_SIZE) {
         debug("reducing packethold size");
         odebug("%d", hold->num_packets);
-        odebug("%zd", hold->offset);
+        odebug(IFWIN32("%Iu","%zu"), hold->offset);
         odebug("%d", hold->num_slots);
 
         fountain_s* tmp_ptr = realloc(hold->fountain,

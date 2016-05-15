@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h> //memcpy
 #include <string.h>
+#include <inttypes.h>
 #include <time.h> //time
 #include <unistd.h> //getopt
 #include <getopt.h> //getopt_long
@@ -38,6 +39,7 @@ static void close_connection();
 static int send_fountain(client_s * client, fountain_s* ftn);
 static int send_block_burst(client_s * client, const char * filename, int capacity);
 static int send_info(client_s * client, const char * filename);
+static int filesize_in_bytes(const char * filename);
 
 
 
@@ -59,7 +61,7 @@ static WSADATA w;
 static int listen_port = LISTEN_PORT;
 static char* listen_ip = LISTEN_IP;
 static char const * program_name;
-static int blk_size = 128; /* better to set this based on filesize */
+static int blk_size = -1; /* better to set this based on filesize */
 
 static int dbg_add_response_latency = 0;
 
@@ -124,6 +126,23 @@ int main(int argc, char** argv) {
     FILE* f = fopen(filename, "rb");
     if (f == NULL) handle_error(ERR_FOPEN, &filename);
     fclose(f);
+
+    if (blk_size <= 0) {
+        blk_size = 128;
+        int filesize = filesize_in_bytes(filename);
+        if (filesize < 0)
+            return -1;
+        while (filesize / blk_size > INT16_MAX) {
+            blk_size <<= 1;
+        }
+        odebug("%d", blk_size);
+    } else if (filesize_in_bytes(filename) / blk_size > INT16_MAX) {
+        /*  The user provided a blk_size... better check they haven't done  *
+         *  a silly                                                         */
+        log_err("Block size is too small. Cannot divide file "
+                "into %"PRId16" pieces or more", INT16_MAX);
+        return -1;
+    }
 
     int error;
     if ((error = create_connection(listen_ip)) < 0) {
@@ -242,7 +261,7 @@ static void file_info_order_for_network(file_info_s* info) {
     info->filesize = htonl(info->filesize);
 }
 
-static int filesize_in_bytes(const char * filename) {
+int filesize_in_bytes(const char * filename) {
     struct stat st;
     if (stat(filename, &st) == 0)
         return st.st_size;
@@ -273,9 +292,9 @@ int send_info(client_s * client, const char * filename) {
 
     strncpy(info.filename, filename, sizeof info.filename - 1);
 
-    odebug("%d", info.blk_size);
-    odebug("%d", info.num_blocks);
-    odebug("%d", info.filesize);
+    odebug("%"PRId16, info.blk_size);
+    odebug("%"PRId16, info.num_blocks);
+    odebug("%"PRId32, info.filesize);
 
     file_info_order_for_network(&info);
 
