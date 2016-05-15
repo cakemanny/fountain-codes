@@ -153,7 +153,7 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
 
     // Only allocate if we actually need to
     char * buffer;
-    if (blk_size <= MAX_BLOCK_SIZE) {
+    if (blk_size > MAX_BLOCK_SIZE) {
          buffer = malloc(blk_size);
         if (!buffer) goto free_os;
     } else
@@ -161,13 +161,20 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
 
     for (int i = 0; i < output->num_blocks; i++) {
         int m = block_list[i] * blk_size;
-        fseek(f, m, SEEK_SET); /* m bytes from beginning of file */
+        if (fseek(f, m, SEEK_SET) < 0)  { /* m bytes from beginning of file */
+            log_err("Couldn't seek to pos %d in file", m);
+            goto free_os;
+        }
         int bytes = fread(buffer, 1, blk_size, f);
+        if (bytes < blk_size && ferror(f)) {
+            log_err("Error reading file");
+            goto free_os;
+        }
         xorncpy(output->string, buffer, bytes);
     }
 
     // Cleanup
-    if (blk_size <= MAX_BLOCK_SIZE) free(buffer);
+    if (blk_size > MAX_BLOCK_SIZE) free(buffer);
 
     return output;
 
