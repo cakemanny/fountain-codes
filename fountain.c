@@ -214,7 +214,6 @@ free_ftn:
 }
 
 void free_fountain(fountain_s* ftn) {
-    if (ftn->block) free(ftn->block);
     if (ftn->string) free(ftn->string);
     if (ftn->block_set) free(ftn->block_set);
     free(ftn);
@@ -262,14 +261,8 @@ cleanup:
 void print_fountain(const fountain_s * ftn) {
     printf("{ num_blocks: %"PRId32", blk_size: %"PRId32", seed: %"PRIu64", blocks: ",
             ftn->num_blocks, ftn->blk_size, ftn->seed);
-    if (ftn->block) {
-        for (int i = 0; i < ftn->num_blocks; i++) {
-            printf("%d ", ftn->block[i]);
-        }
-    } else {
-        for (int i = 0; i < ftn->block_set_len; i++)
-            printf("%x", ftn->block_set[i]);
-    }
+    for (int i = 0; i < ftn->block_set_len; i++)
+        printf("%x", ftn->block_set[i]);
     printf("}\n");
 }
 
@@ -688,8 +681,6 @@ fountain_s* unpack_fountain(buffer_s packet, int filesize_in_blocks) {
     if (!ftn->block_set) goto free_string;
     ftn->block_set_len = filesize_in_blocks/32 + 1;
 
-    ftn->block = NULL;
-
     return ftn;
 free_string:
     if (ftn->string) free(ftn->string);
@@ -804,7 +795,6 @@ int packethold_add(packethold_s* hold, fountain_s* ftn) {
     // thing to happen before returning the packet
     hold->fountain[hold->offset++] = *ftn;
     ftn->string = NULL;
-    ftn->block = NULL;
     ftn->block_set = NULL;
 
     CLEARBIT(hold->mark, hold->num_packets);
@@ -821,8 +811,8 @@ void packethold_print(packethold_s* hold) {
             fprintf(stderr, " *");
         else
             fprintf(stderr, "  ");
-        for (int j = 0; j < ftn->num_blocks; j++)
-            fprintf(stderr, " %d", ftn->block[j]); // TODO stopped using block
+        for (int j = 0; j < ftn->block_set_len; j++)
+            fprintf(stderr, "%x", ftn->block_set[j]);
         fprintf(stderr, "\n");
     }
     fprintf(stderr, "==== End P-Hold ====\n\n");

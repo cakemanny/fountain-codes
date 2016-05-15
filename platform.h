@@ -7,4 +7,10 @@
 #   define IFWIN32(x,y)     y
 #endif
 
+#ifdef __GNUC__
+#define __malloc    __attribute__((malloc))
+#else
+#define __malloc    /* */
+#endif // __GNUC__
+
 #endif /* __PLATFORM_H__ */

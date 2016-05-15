@@ -47,7 +47,7 @@ static void close_connection();
 static fountain_s* from_network();
 static int get_remote_file_info(struct file_info_s*);
 static void platform_truncate(const char* filename, int length);
-static char* alloc_sanitize_path(const char* unsafepath);
+__attribute__((malloc)) static char* sanitize_path(const char* unsafepath);
 
 struct option long_options[] = {
     { "help",   no_argument,        NULL, 'h' },
@@ -159,7 +159,7 @@ int main(int argc, char** argv) {
     netbuf_len = to_alloc;
 
     if (!outfilename) {
-        outfilename = alloc_sanitize_path(file_info.filename);
+        outfilename = sanitize_path(file_info.filename);
         if (!outfilename)
             goto shutdown;
         debug("Sanitized path: %s", outfilename);
@@ -199,7 +199,7 @@ void platform_truncate(const char* filename, int length) {
     #endif // _WIN32
 }
 
-char* alloc_sanitize_path(const char* unsafepath)
+char* sanitize_path(const char* unsafepath)
 {
 #ifdef _WIN32
     /*

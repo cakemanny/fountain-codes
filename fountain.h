@@ -4,6 +4,7 @@
 #include <stdio.h> // FILE
 #include <stdint.h>
 #include "errors.h"
+#include "platform.h"
 
 /* ------ Structure definitions ------ */
 
@@ -11,8 +12,7 @@ typedef struct fountain_s {
     int32_t num_blocks;
     int32_t blk_size;
     uint64_t seed;
-    int* block; // they start from block 0 -- TODO rename this blocks
-    char* string;
+    char* string;   // TODO: rename this "data"
     size_t block_set_len;
     uint32_t* block_set; // Use bitset on receiving end
 } fountain_s;
@@ -60,8 +60,8 @@ extern char* memdecodestate_filename;
  * \param length The length of the block of memory
  * \returns pointer to a new fountain_s
  */
-fountain_s* make_fountain(const char* string, int blk_size, size_t length); /* allocs memory */
-fountain_s* fmake_fountain(FILE* f, int blk_size); /* allocs memory */
+fountain_s* make_fountain(const char* string, int blk_size, size_t length) __malloc; /* allocs memory */
+fountain_s* fmake_fountain(FILE* f, int blk_size) __malloc; /* allocs memory */
 void free_fountain(fountain_s* ftn);
 int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2);
 char* decode_fountain(const char* string, int blk_size);
@@ -106,10 +106,10 @@ buffer_s pack_fountain(fountain_s* ftn);
 
    returns A pointer to the deserialized fountain or NULL on failure
 */
-fountain_s* unpack_fountain(buffer_s packet, int filesize_in_blocks);
+fountain_s* unpack_fountain(buffer_s packet, int filesize_in_blocks) __malloc;
 
 /* ============ packethold_s functions  ==================================== */
-packethold_s* packethold_new(); /* allocs memory */
+packethold_s* packethold_new() __malloc; /* allocs memory */
 void packethold_free(packethold_s* hold);
 fountain_s* packethold_remove(packethold_s* hold, int pos, fountain_s* output); /* allocs memory*/
 
@@ -134,7 +134,7 @@ void packethold_print(packethold_s* hold);
      filename, fp
    initialized as NULL
  */
-decodestate_s* decodestate_new(int blk_size, int num_blocks);
+decodestate_s* decodestate_new(int blk_size, int num_blocks) __malloc;
 void decodestate_free(decodestate_s* state);
 int decodestate_is_decoded(decodestate_s* state);
 
