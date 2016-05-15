@@ -40,8 +40,14 @@ char* map_file(char const * filename) {
     if (num_mappings >= 32)
         return NULL;
 #ifdef _WIN32
-	HANDLE file = CreateFileA(
-		filename,		/* filename */
+    // Convert filename to wide string
+    // Need at most two bytes per character
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, filename, -1, NULL, 0);
+    WCHAR wfilename[wlen];
+    MultiByteToWideChar(CP_UTF8, 0, filename, -1, wfilename, wlen);
+
+	HANDLE file = CreateFileW(
+		wfilename,		/* filename */
 		GENERIC_READ | GENERIC_WRITE, /* desired access */
 		0,				/* Dont' share */
 		NULL,			/* don't care about security */

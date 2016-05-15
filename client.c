@@ -13,6 +13,7 @@
 
 #ifdef _WIN32
 #   include <fcntl.h> // open -- the mingw unix open
+#   include <sys/stat.h> //  permissions for _wopen
 #   include "asprintf.h"
 #   include "stpcpy.h"
 #endif
@@ -172,7 +173,6 @@ int main(int argc, char** argv) {
 
     // We will at some point need to truncate to a whole number of blocks
     // when we introduce memory mapped files into the equation
-    fclose(fopen(outfilename, "wb+"));
     platform_truncate(outfilename, file_info.blk_size * file_info.num_blocks);
 
     filesize_in_blocks = file_info.num_blocks;
@@ -192,12 +192,17 @@ shutdown:
 
 void platform_truncate(const char* filename, int length) {
     #ifdef _WIN32
-        int fd = open(filename, O_RDWR | O_APPEND);
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, filename, -1, NULL, 0);
+        wchar_t wfilename[wlen];
+        MultiByteToWideChar(CP_UTF8, 0, filename, -1, wfilename, wlen);
+
+        int fd = _wopen(wfilename, _O_CREAT | _O_RDWR | _O_APPEND, _S_IREAD | _S_IWRITE);
         if (fd >= 0 && ftruncate(fd, length) >= 0) {
-            close(fd);
+            _close(fd);
         } else
             log_err("Failed to truncate the output file");
     #else
+        fclose(fopen(filename, "wb+"));
         if (truncate(filename, length) < 0)
             log_err("Failed to truncate the output file");
     #endif // _WIN32
