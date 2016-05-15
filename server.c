@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
     fclose(f);
 
     if (blk_size <= 0) {
-        blk_size = 128;
+        blk_size = 128; // Should probably start at 1024
         int filesize = filesize_in_bytes(filename);
         if (filesize < 0)
             return -1;
@@ -140,7 +140,10 @@ int main(int argc, char** argv) {
         /*  The user provided a blk_size... better check they haven't done  *
          *  a silly                                                         */
         log_err("Block size is too small. Cannot divide file "
-                "into %"PRId16" pieces or more", INT16_MAX);
+                "into %d pieces or more", INT16_MAX);
+        return -1;
+    } else if (blk_size > MAX_BLOCK_SIZE) {
+        log_err("Maximum block size is %d", MAX_BLOCK_SIZE);
         return -1;
     }
 

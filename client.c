@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h> //memcpy
 #include <string.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include <unistd.h> //getopt
 #include <getopt.h> //getopt_long
 
@@ -22,7 +24,6 @@
 
 #define DEFAULT_PORT 2534
 #define DEFAULT_IP "127.0.0.1"
-#define BUF_LEN 512 // 4 times the blksize -- should be ok
 #define BURST_SIZE 1000
 
 // ------ types ------
@@ -145,11 +146,14 @@ int main(int argc, char** argv) {
     }
     debug("Downloading %s", file_info.filename);
     odebug("%d", file_info.blk_size);
+    if (file_info.blk_size > MAX_BLOCK_SIZE) {
+        log_err("Block size (%"PRId16") larger than allowed: %d",
+                  file_info.blk_size, MAX_BLOCK_SIZE);
+    }
 
     int to_alloc = 512;
-    while (to_alloc < 4 * file_info.blk_size) {
-        to_alloc = to_alloc << 1;
-        if (to_alloc >= 8 * 1024) break;
+    while (to_alloc < file_info.blk_size + FTN_HEADER_SIZE + sizeof(uint16_t)) {
+        to_alloc <<= 1;
     }
     netbuf = malloc(to_alloc);
     if (!netbuf) {

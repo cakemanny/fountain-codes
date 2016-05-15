@@ -6,6 +6,8 @@
 #include "errors.h"
 #include "platform.h"
 
+#define MAX_BLOCK_SIZE 16384
+
 /* ------ Structure definitions ------ */
 
 typedef struct fountain_s {
@@ -21,6 +23,9 @@ typedef struct fountain_s {
  * different sizes on different systems
  */
 #define FTN_HEADER_SIZE (2 * sizeof(int32_t) + sizeof(uint64_t))
+
+/* include the checksum at the beginning */
+#define MAX_PACKED_FTN_SIZE (sizeof(int16_t) + FTN_HEADER_SIZE + MAX_BLOCK_SIZE)
 
 typedef struct packethold_s {
     int num_packets;

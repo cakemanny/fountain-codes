@@ -33,9 +33,6 @@
 
 #define BUFFER_SIZE 256
 
-#define MAX_BLOCK_SIZE 4096
-static char fmake_buf[MAX_BLOCK_SIZE];
-
 char* memdecodestate_filename = "__memory__fountain__";
 
 
@@ -131,6 +128,8 @@ error:
 
 /* makes a fountain fountain, given a file */
 fountain_s* fmake_fountain(FILE* f, int blk_size) {
+    static char fmake_buf[4096];
+
     fountain_s* output = malloc(sizeof *output);
     if (!output) return NULL;
 
@@ -153,7 +152,7 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
 
     // Only allocate if we actually need to
     char * buffer;
-    if (blk_size > MAX_BLOCK_SIZE) {
+    if (blk_size > sizeof(fmake_buf)) {
          buffer = malloc(blk_size);
         if (!buffer) goto free_os;
     } else
@@ -165,7 +164,7 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
             log_err("Couldn't seek to pos %d in file", m);
             goto free_os;
         }
-        int bytes = fread(buffer, 1, blk_size, f);
+        size_t bytes = fread(buffer, 1, blk_size, f);
         if (bytes < blk_size && ferror(f)) {
             log_err("Error reading file");
             goto free_os;
@@ -174,7 +173,7 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
     }
 
     // Cleanup
-    if (blk_size > MAX_BLOCK_SIZE) free(buffer);
+    if (blk_size > sizeof(fmake_buf)) free(buffer);
 
     return output;
 
@@ -668,9 +667,9 @@ fountain_s* unpack_fountain(buffer_s packet, int filesize_in_blocks) {
 
 // because our fountain packet can be of variable size we had to wait until
 // this point before we were able to calculate the checksum
-    int calculated = Fletcher16((uint8_t*)packed_ftn, packet.length - sizeof checksum);
-    odebug("%d", checksum);
-    odebug("%d", calculated);
+    uint16_t calculated = Fletcher16((uint8_t*)packed_ftn, packet.length - sizeof checksum);
+    odebug("%"PRIu16, checksum);
+    odebug("%"PRIu16, calculated);
     if (checksum != calculated) {
         log_warn("checksums do not match");
         return NULL; }
