@@ -26,10 +26,9 @@ typedef struct info_request_s {
 // The file information that is sent
 typedef struct file_info_s {
     int32_t magic;          // Should always be MAGIC_INFO
-    int16_t blk_size;
-    int16_t num_blocks;     // TODO: remove. This is redundant, can calculate
-    int32_t filesize;       // The actual size in bytes
     int16_t section_size;   // number of blocks per section
+    int16_t blk_size;
+    int32_t filesize;       // The actual size in bytes
     char filename[256];
 } file_info_s;
 

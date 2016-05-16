@@ -50,7 +50,9 @@ static void close_connection();
 static fountain_s* get_ftn_from_network(int section);
 static int get_remote_file_info(struct file_info_s*);
 static void platform_truncate(const char* filename, int length);
-__attribute__((malloc)) static char* sanitize_path(const char* unsafepath);
+static char* sanitize_path(const char* unsafepath) __malloc;
+static int file_info_bytes_per_section(file_info_s* info);
+static int file_info_calc_num_sections(file_info_s* info);
 
 struct option long_options[] = {
     { "help",   no_argument,        NULL, 'h' },
@@ -175,7 +177,9 @@ int main(int argc, char** argv) {
 
     // We will at some point need to truncate to a whole number of blocks
     // when we introduce memory mapped files into the equation
-    platform_truncate(outfilename, file_info.blk_size * file_info.num_blocks);
+    int num_sections = file_info_calc_num_sections(&file_info);
+    int bytes_per_section = file_info_bytes_per_section(&file_info);
+    platform_truncate(outfilename, num_sections * bytes_per_section);
 
     section_size_in_blocks = file_info.section_size;
     // do { get some packets, try to decode } while ( not decoded )
@@ -204,7 +208,7 @@ void platform_truncate(const char* filename, int length) {
         } else
             log_err("Failed to truncate the output file");
     #else
-        fclose(fopen(filename, "wb+"));
+        fclose(fopen(filename, "ab+"));
         if (truncate(filename, length) < 0)
             log_err("Failed to truncate the output file");
     #endif // _WIN32
@@ -312,10 +316,9 @@ static void packet_order_for_network(packet_s* packet) {
 
 static void file_info_order_from_network(file_info_s* info) {
     fp_from(info->magic);
-    fp_from(info->blk_size);
-    fp_from(info->num_blocks);
-    fp_from(info->filesize);
     fp_from(info->section_size);
+    fp_from(info->blk_size);
+    fp_from(info->filesize);
 }
 
 static void wait_signal_order_for_network(wait_signal_s* wait_signal) {
@@ -393,7 +396,6 @@ int get_remote_file_info(file_info_s* file_info) {
         // TODO: check
         // blk_size * (num_blocks - 1) <= filesize <= blk_size * num_blocks ?
         if (file_info->blk_size < 0
-                || file_info->num_blocks < 0
                 || file_info->filesize < 0) {
             log_err("Corrupt packet");
             return ERR_NETWORK;
@@ -492,8 +494,6 @@ static void load_from_network(ftn_cache_s* cache, int section) {
             .length = bytes_recvd,
             .buffer = netbuf
         };
-        // FIXME: section_size_in_blocks is only valid for sections
-        // up to n -1. the last section may have less blocks
         fountain_s* ftn = unpack_fountain(packet, section_size_in_blocks);
         if (ftn == NULL) { // Checksum may have failed
             // If the system runs out of memory this may become an infinite
@@ -546,11 +546,11 @@ fountain_s* get_ftn_from_network(int section) {
     return output;
 }
 
-static int file_info_bytes_per_section(file_info_s* info)
+int file_info_bytes_per_section(file_info_s* info)
 {
     return info->blk_size * info->section_size;
 }
-static int file_info_calc_num_sections(file_info_s* info)
+int file_info_calc_num_sections(file_info_s* info)
 {
     int bytes_per_section = file_info_bytes_per_section(info);
     return (info->filesize + bytes_per_section - 1) / bytes_per_section;
@@ -576,14 +576,8 @@ int proc_file(file_info_s* file_info) {
     int bytes_per_section = file_info_bytes_per_section(file_info);
     odebug("%d", bytes_per_section);
     for (int section_num = 0; section_num < num_sections; section_num++) {
-        int num_blocks_in_section;
-        if (1 + section_num == num_sections) {
-            num_blocks_in_section = file_info->num_blocks % file_info->section_size;
-        } else {
-            num_blocks_in_section = file_info->section_size;
-        }
         decodestate_s* state =
-            decodestate_new(file_info->blk_size, num_blocks_in_section);
+            decodestate_new(file_info->blk_size, file_info->section_size);
         if (!state) return handle_error(ERR_MEM, NULL);
 
         decodestate_s* tmp_ptr;
@@ -605,7 +599,7 @@ int proc_file(file_info_s* file_info) {
             if (result < 0) goto cleanup;
         } while (!decodestate_is_decoded(state));
 
-        log_info("Packets required for section: %d", state->packets_so_far);
+        log_info("Packets required for section %d: %d", section_num, state->packets_so_far);
         total_packets += state->packets_so_far;
 cleanup:
         if (state)

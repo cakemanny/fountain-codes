@@ -268,10 +268,9 @@ int receive_request(client_s * new_client, const char * filename) {
 
 static void file_info_order_for_network(file_info_s* info) {
     fp_to(info->magic);
-    fp_to(info->blk_size);
-    fp_to(info->num_blocks);
-    fp_to(info->filesize);
     fp_to(info->section_size);
+    fp_to(info->blk_size);
+    fp_to(info->filesize);
 }
 
 int filesize_in_bytes(const char * filename) {
@@ -282,25 +281,15 @@ int filesize_in_bytes(const char * filename) {
     return -1;
 }
 
-static int fsize_in_blocks(const char * filename) {
-    int filesize = filesize_in_bytes(filename);
-    if (filesize < 0) return filesize; // which is an error code
-
-    return (filesize + blk_size - 1) / blk_size;
-}
-
-/* This is the size in blocks not the actual filesize we are sending... */
-
 
 int send_info(client_s * client, const char * filename) {
     debug("Sending info for file %s", filename);
 
     file_info_s info = {
         .magic          = MAGIC_INFO,
+        .section_size   = section_size,
         .blk_size       = blk_size,
-        .num_blocks     = fsize_in_blocks(filename),
         .filesize       = filesize_in_bytes(filename),
-        .section_size   = section_size
     };
 
     strncpy(info.filename, filename, sizeof info.filename - 1);
@@ -313,7 +302,6 @@ int send_info(client_s * client, const char * filename) {
 #endif
 
     odebug("%"PRId16, info.blk_size);
-    odebug("%"PRId16, info.num_blocks);
     odebug("%"PRId32, info.filesize);
 
     file_info_order_for_network(&info);

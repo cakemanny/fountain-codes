@@ -138,15 +138,11 @@ fountain_s* fmake_fountain(FILE* f, int blk_size, int section, int section_size)
     if (!output) return NULL;
 
     memset(output, 0, sizeof *output);
-    // get filesize
-    fseek(f, 0, SEEK_END);
-    int filesize = ftell(f);
-    int n = (filesize - offset < bytes_per_section)
-        ? size_in_blocks(filesize - offset, blk_size) : section_size;
-    assert( n <= section_size );
+
     output->blk_size = blk_size;
     output->section = section;
 
+    int n = section_size; // Always
     output->num_blocks = choose_num_blocks(n);
     output->seed = rand();
     int block_list[output->num_blocks];
@@ -176,7 +172,8 @@ fountain_s* fmake_fountain(FILE* f, int blk_size, int section, int section_size)
             log_err("Error reading file");
             goto free_os;
         }
-        xorncpy(output->string, buffer, bytes);
+        if (bytes)
+            xorncpy(output->string, buffer, bytes);
     }
 
     // Cleanup
@@ -407,8 +404,7 @@ typedef int (*blockwrite_f)(void* /*buffer*/,
 
 static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
         blockread_f bread, blockwrite_f bwrite) {
-    if (ftn->num_blocks <= 0) // Could be a glitch
-        return ERR_INVALID;
+    assert(ftn->num_blocks > 0);
 
     bool retest = false;
     char* blkdec = state->blkdecoded;
