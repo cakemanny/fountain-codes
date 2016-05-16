@@ -37,7 +37,7 @@ static int create_connection(const char* ip_address);
 static int receive_request(client_s * new_client, const char * filename);
 static void close_connection();
 static int send_fountain(client_s * client, fountain_s* ftn);
-static int send_block_burst(client_s * client, const char * filename, int capacity);
+static int send_block_burst(client_s * client, const char * filename, int capacity, int section);
 static int send_info(client_s * client, const char * filename);
 static int filesize_in_bytes(const char * filename);
 
@@ -50,6 +50,7 @@ struct option long_options[] = {
     { "ip",         required_argument, NULL, 'i' },
     { "latency",    required_argument, NULL, 'L' },
     { "port",       required_argument, NULL, 'p' },
+    { "sectionsize",required_argument, NULL, 's' },
     { 0, 0, 0, 0 }
 };
 
@@ -62,6 +63,7 @@ static int listen_port = LISTEN_PORT;
 static char* listen_ip = LISTEN_IP;
 static char const * program_name;
 static int blk_size = -1; /* better to set this based on filesize */
+static int section_size = 20;
 
 static int dbg_add_response_latency = 0;
 
@@ -78,6 +80,8 @@ static void print_usage_and_exit(int status) {
                               0.0.0.0\n\
   -L, --latency=LATENCY     debug setting: adds response latency to the server\n\
   -p, --port=PORT           set the UDP port to listen on, default is 2534\n\
+  -s, --sectionsize=BLOCKS  the number of sections of blocks the file is\n\
+                              sub-divided into\n\
 ", out);
     exit(status);
 }
@@ -86,7 +90,7 @@ int main(int argc, char** argv) {
     /* deal with options */
     program_name = argv[0];
     int c;
-    while ( (c = getopt_long(argc, argv, "b:hi:L:p:", long_options, NULL)) != -1) {
+    while ( (c = getopt_long(argc, argv, "b:hi:L:p:s:", long_options, NULL)) != -1) {
         switch (c) {
             case 'b':
                 blk_size = atoi(optarg);
@@ -102,6 +106,9 @@ int main(int argc, char** argv) {
                 break;
             case 'p':
                 listen_port = atoi(optarg);
+                break;
+            case 's':
+                section_size = atoi(optarg);
                 break;
             case '?':
                 print_usage_and_exit(1);
@@ -201,8 +208,9 @@ void close_connection() {
 
 
 static void wait_signal_order_from_network(wait_signal_s* wait_signal) {
-    wait_signal->magic = htonl(wait_signal->magic);
-    wait_signal->capacity = htonl(wait_signal->capacity);
+    fp_from(wait_signal->magic);
+    fp_from(wait_signal->capacity);
+    fp_from(wait_signal->section);
 }
 //
 // Translate the message sent to us
@@ -244,7 +252,8 @@ int receive_request(client_s * new_client, const char * filename) {
             {
                 wait_signal_s* signal = (wait_signal_s*)buf;
                 wait_signal_order_from_network(signal);
-                error = send_block_burst( new_client, filename, signal->capacity);
+                error = send_block_burst(new_client, filename,
+                                         signal->capacity, signal->section);
             }
             break;
         default:
@@ -258,10 +267,11 @@ int receive_request(client_s * new_client, const char * filename) {
 
 
 static void file_info_order_for_network(file_info_s* info) {
-    info->magic = htonl(info->magic);
-    info->blk_size = htons(info->blk_size);
-    info->num_blocks = htons(info->num_blocks);
-    info->filesize = htonl(info->filesize);
+    fp_to(info->magic);
+    fp_to(info->blk_size);
+    fp_to(info->num_blocks);
+    fp_to(info->filesize);
+    fp_to(info->section_size);
 }
 
 int filesize_in_bytes(const char * filename) {
@@ -272,12 +282,11 @@ int filesize_in_bytes(const char * filename) {
     return -1;
 }
 
-static int fsize_in_blocks (const char * filename) {
+static int fsize_in_blocks(const char * filename) {
     int filesize = filesize_in_bytes(filename);
-    if (filesize < 0) return filesize;
+    if (filesize < 0) return filesize; // which is an error code
 
-    return (filesize % blk_size)
-        ? (filesize /blk_size) + 1 : filesize / blk_size;
+    return (filesize + blk_size - 1) / blk_size;
 }
 
 /* This is the size in blocks not the actual filesize we are sending... */
@@ -287,10 +296,11 @@ int send_info(client_s * client, const char * filename) {
     debug("Sending info for file %s", filename);
 
     file_info_s info = {
-        .magic      = MAGIC_INFO,
-        .blk_size   = blk_size,
-        .num_blocks = fsize_in_blocks(filename),
-        .filesize   = filesize_in_bytes(filename)
+        .magic          = MAGIC_INFO,
+        .blk_size       = blk_size,
+        .num_blocks     = fsize_in_blocks(filename),
+        .filesize       = filesize_in_bytes(filename),
+        .section_size   = section_size
     };
 
     strncpy(info.filename, filename, sizeof info.filename - 1);
@@ -330,19 +340,19 @@ int send_fountain(client_s * client, fountain_s* ftn) {
     return 0;
 }
 
-int send_block_burst(client_s * client, const char * filename, int capacity) {
+int send_block_burst(client_s * client, const char * filename, int capacity, int section) {
     FILE* f = fopen(filename, "rb");
     if (!f) return ERR_FOPEN;
     for (int i = 0; i < capacity; i++) {
         // make a fountain
         // send it across the air
-        fountain_s* ftn = fmake_fountain(f, blk_size);
+        fountain_s* ftn = fmake_fountain(f, blk_size, section, section_size);
         if (ftn == NULL) return ERR_MEM;
         int error = send_fountain(client, ftn);
         if (error < 0) handle_error(error, NULL);
         free_fountain(ftn);
     }
-    log_info("Sent packet burst of size %d", capacity);
+    log_info("Sent packet burst of size %d for section %d", capacity, section);
 
     fclose(f);
     return 0;

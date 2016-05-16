@@ -8,6 +8,7 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <math.h>
+#include <assert.h>
 #include "errors.h"
 #include "platform.h"
 #include "fountain.h"
@@ -66,8 +67,7 @@ static unsigned int log2i(unsigned int v) { // 32-bit word to find the log of
 #endif /*__builtin_ctz*/
 
 static int size_in_blocks(int string_len, int blk_size) {
-    return (string_len % blk_size)
-        ? (string_len / blk_size) + 1 : string_len / blk_size;
+    return (string_len + blk_size - 1) / blk_size;
 }
 
 /*
@@ -87,6 +87,7 @@ static int choose_num_blocks(const int n) {
  * param blocks The result
  */
 static void seeded_select_blocks(int* blocks, int n, int d, uint64_t seed) {
+    assert( d <= n );
 
     for (int i = 0; i < d; i++) {
         randgen_s gen = next_rand(seed);
@@ -105,10 +106,10 @@ static void seeded_select_blocks(int* blocks, int n, int d, uint64_t seed) {
 /*
  * Same as seeded_select_blocks but creates a bitset rather than an array of
  * the block numbers
- * @param blocks Not used - TODO: remove parameter
  */
-static uint32_t* seeded_select_blockset(int* blocks, int n, int d, uint64_t seed) {
-    uint32_t* block_set = calloc((n/32 + 1), sizeof *block_set);
+static uint32_t* seeded_select_blockset(int n, int d, uint64_t seed) {
+    assert( d <= n );
+    uint32_t* block_set = calloc((n + 31) / 32, sizeof *block_set);
     check_mem(block_set);
 
     for (int i = 0; i < d; i++) {
@@ -127,8 +128,11 @@ error:
 }
 
 /* makes a fountain fountain, given a file */
-fountain_s* fmake_fountain(FILE* f, int blk_size) {
+fountain_s* fmake_fountain(FILE* f, int blk_size, int section, int section_size) {
     static char fmake_buf[4096];
+
+    int bytes_per_section = section_size * blk_size;
+    int offset = section * bytes_per_section;
 
     fountain_s* output = malloc(sizeof *output);
     if (!output) return NULL;
@@ -137,8 +141,11 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
     // get filesize
     fseek(f, 0, SEEK_END);
     int filesize = ftell(f);
-    int n = size_in_blocks(filesize, blk_size);
+    int n = (filesize - offset < bytes_per_section)
+        ? size_in_blocks(filesize - offset, blk_size) : section_size;
+    assert( n <= section_size );
     output->blk_size = blk_size;
+    output->section = section;
 
     output->num_blocks = choose_num_blocks(n);
     output->seed = rand();
@@ -160,8 +167,8 @@ fountain_s* fmake_fountain(FILE* f, int blk_size) {
 
     for (int i = 0; i < output->num_blocks; i++) {
         int m = block_list[i] * blk_size;
-        if (fseek(f, m, SEEK_SET) < 0)  { /* m bytes from beginning of file */
-            log_err("Couldn't seek to pos %d in file", m);
+        if (fseek(f, offset + m, SEEK_SET) < 0)  { /* m bytes from beginning of section */
+            log_err("Couldn't seek to pos %d in file", offset + m);
             goto free_os;
         }
         size_t bytes = fread(buffer, 1, blk_size, f);
@@ -183,7 +190,7 @@ free_ftn:
     return NULL;
 }
 
-fountain_s* make_fountain(const char* string, int blk_size, size_t length) {
+fountain_s* make_fountain(const char* string, int blk_size, size_t length, int section) {
     fountain_s* output = malloc(sizeof *output);
     if (output == NULL) return NULL;
 
@@ -208,9 +215,10 @@ fountain_s* make_fountain(const char* string, int blk_size, size_t length) {
 
     // We need to allocate the blockset for our local test version
     output->block_set =
-        seeded_select_blockset(NULL, n, output->num_blocks, output->seed);
+        seeded_select_blockset(n, output->num_blocks, output->seed);
     if (!output->block_set) goto free_ftn;
-    output->block_set_len = n/32 + 1;
+    output->block_set_len = (n + 31) / 32;
+    output->section = section;
 
     return output;
 
@@ -226,12 +234,13 @@ void free_fountain(fountain_s* ftn) {
 }
 
 int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2) {
+    // We should never be comparing fountains from different files or sections
+    assert(ftn1->section == ftn2->section);
+
     int ret;
-    if (( ret = ftn1->blk_size - ftn2->blk_size ))
-        return ret;
-    if (( ret = (ftn1->num_blocks - ftn2->num_blocks) ))
-        return ret;
-    if (( ret = memcmp(ftn1->string, ftn2->string, ftn1->blk_size) ))
+    if (( (ret = ftn1->blk_size - ftn2->blk_size)
+       || (ret = ftn1->num_blocks - ftn2->num_blocks)
+       || (ret = memcmp(ftn1->string, ftn2->string, ftn1->blk_size)) ))
         return ret;
 
     for (int i=0; i < ftn1->block_set_len; ++i) {
@@ -245,6 +254,7 @@ int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2) {
 int fountain_copy(fountain_s* dst, fountain_s* src) {
     int blk_size = (dst->blk_size = src->blk_size);
     dst->num_blocks = src->num_blocks;
+    dst->section = src->section;
     dst->seed = src->seed;
     dst->block_set_len = src->block_set_len;
 
@@ -265,8 +275,8 @@ cleanup:
 }
 
 void print_fountain(const fountain_s * ftn) {
-    printf("{ num_blocks: %"PRId32", blk_size: %"PRId32", seed: %"PRIu64", blocks: ",
-            ftn->num_blocks, ftn->blk_size, ftn->seed);
+    printf("{ num_blocks: %"PRId32", blk_size: %"PRId16", section: %"PRIu16", seed: %"PRIu64", blocks: ",
+            ftn->num_blocks, ftn->blk_size, ftn->section, ftn->seed);
     for (int i = 0; i < ftn->block_set_len; i++)
         printf("%x", ftn->block_set[i]);
     printf("}\n");
@@ -325,6 +335,7 @@ static int blockset_lowest_set_above(uint32_t* block_set, int block_set_len, int
 //}
 
 static bool fountain_issubset_bit(const fountain_s* sub, const fountain_s* super) {
+    assert( sub->section == super->section );
     // if we have a subset then sub[i] & super[i] == sub[i] forall i
     // so if result is still 0 at end then this is true
     uint32_t result = 0;
@@ -590,7 +601,7 @@ char* decode_fountain(const char* string, int blk_size) {
 
     fountain_s* ftn = NULL;
     do {
-        ftn = make_fountain(string, blk_size, length);
+        ftn = make_fountain(string, blk_size, length, 0);
         if (!ftn) goto cleanup;
         state->packets_so_far += 1;
         result = _decode_fountain(state, ftn, &sblockread, &sblockwrite);
@@ -646,6 +657,8 @@ buffer_s pack_fountain(fountain_s* ftn) {
     memcpy(packed_ftn, ftn, FTN_HEADER_SIZE);
     memcpy(packed_ftn + FTN_HEADER_SIZE, ftn->string, ftn->blk_size);
 
+    // TODO: do byte order conversions
+
     // now we can calculate and fill in the hole at the beginning
     checksum = Fletcher16(packed_ftn, packet_size - sizeof checksum);
     memcpy(buf_start, &checksum, sizeof checksum);
@@ -657,7 +670,7 @@ buffer_s pack_fountain(fountain_s* ftn) {
 }
 
 
-fountain_s* unpack_fountain(buffer_s packet, int filesize_in_blocks) {
+fountain_s* unpack_fountain(buffer_s packet, int section_size_in_blocks) {
     if (!packet.buffer) return NULL;
 
     uint16_t checksum = *((uint16_t*)packet.buffer);
@@ -678,14 +691,16 @@ fountain_s* unpack_fountain(buffer_s packet, int filesize_in_blocks) {
     if (!ftn)  return NULL;
     memcpy(ftn, packed_ftn, FTN_HEADER_SIZE);
 
+    // TODO: do byte order conversions
+
     ftn->string = malloc(ftn->blk_size);
     if (!ftn->string) goto free_fountain;
     memcpy(ftn->string, packed_ftn + FTN_HEADER_SIZE, ftn->blk_size);
 
-    ftn->block_set = seeded_select_blockset(NULL,
-            filesize_in_blocks, ftn->num_blocks, ftn->seed);
+    ftn->block_set = seeded_select_blockset(section_size_in_blocks,
+                                            ftn->num_blocks, ftn->seed);
     if (!ftn->block_set) goto free_string;
-    ftn->block_set_len = filesize_in_blocks/32 + 1;
+    ftn->block_set_len = (section_size_in_blocks + 31) / 32;
 
     return ftn;
 free_string:
@@ -708,7 +723,7 @@ packethold_s* packethold_new() {
     hold->fountain = calloc(BUFFER_SIZE, sizeof *hold->fountain);
     if (!hold->fountain) goto free_hold;
 
-    hold->mark = calloc(BUFFER_SIZE/8 + 1, sizeof(char));
+    hold->mark = calloc((BUFFER_SIZE + 7) / 8 , sizeof(char));
     if (!hold->mark) goto free_fountain;
 
     return hold;
@@ -733,9 +748,13 @@ void packethold_free(packethold_s* hold) {
 /* Remove the ith item from the hold and return a copy of it */
 fountain_s* packethold_remove(packethold_s* hold, int pos, fountain_s* output) {
     *output = hold->fountain[pos];
-
+/*
+ * TODO: Instead of copying, on average, half of the packethold every time
+ * we should just keep a bitset and mark whether the fountain is still valid
+ * and then do garbage collection
+ */
     char* mark = hold->mark;
-    for (int j = pos; j < hold->num_packets - 1; j++) {
+    for (int j = pos; j < hold->num_packets - 1; j++) { // could just use memmove
         hold->fountain[j] = hold->fountain[j+1];
         if (ISBITSET(mark, j + 1)) SETBIT(mark, j);
         else CLEARBIT(mark, j);
@@ -760,7 +779,7 @@ fountain_s* packethold_remove(packethold_s* hold, int pos, fountain_s* output) {
             return NULL;
         }
 
-        char* mark_tmp_ptr = realloc(hold->mark, hold->num_packets/8 + 1);
+        char* mark_tmp_ptr = realloc(hold->mark, (hold->num_packets + 7) / 8);
         if (mark_tmp_ptr) hold->mark = mark_tmp_ptr;
         else {
             handle_error(REALLOC_ERR, NULL);
@@ -785,7 +804,7 @@ int packethold_add(packethold_s* hold, fountain_s* ftn) {
             return REALLOC_ERR;
         }
 
-        char* mark_tmp_ptr = realloc(hold->mark, space/8 + 1);
+        char* mark_tmp_ptr = realloc(hold->mark, (space + 7) / 8);
         if (!mark_tmp_ptr) {
             handle_error(REALLOC_ERR, NULL);
             return REALLOC_ERR;

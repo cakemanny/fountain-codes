@@ -52,7 +52,8 @@ static fountain_s* from_file() {
     if (infilename) {
         FILE* infile = fopen(infilename, "rb");
         if (infile) {
-            output = fmake_fountain(infile, blk_size);
+            // TODO: try out the whole sections thing
+            output = fmake_fountain(infile, blk_size, 0, 1);
             fclose(infile);
         }
     }
@@ -60,7 +61,7 @@ static fountain_s* from_file() {
 }
 
 static fountain_s* from_mem() {
-    return make_fountain(meminput, blk_size, strlen(meminput));
+    return make_fountain(meminput, blk_size, strlen(meminput), 0);
 }
 
 static int proc_file(fountain_src ftn_src) {

@@ -10,6 +10,7 @@
 #include <inttypes.h>
 #include <unistd.h> //getopt
 #include <getopt.h> //getopt_long
+#include <assert.h>
 
 #ifdef _WIN32
 #   include <fcntl.h> // open -- the mingw unix open
@@ -25,11 +26,9 @@
 
 #define DEFAULT_PORT 2534
 #define DEFAULT_IP "127.0.0.1"
-#define BURST_SIZE 1000
+#define BURST_SIZE 100
 
 // ------ types ------
-typedef fountain_s* (*fountain_src)(void);
-
 typedef struct server_s {
     struct sockaddr_in address;
 } server_s;
@@ -37,16 +36,18 @@ typedef struct server_s {
 typedef struct ftn_cache_s {
     int capacity;
     int size;
+    // should probably also have file ref in here
+    int section;
     fountain_s** base;
     fountain_s** current;
 } ftn_cache_s;
 
 
 // ------ Forward declarations ------
-static int proc_file(fountain_src ftn_src, file_info_s* file_info);
+static int proc_file(file_info_s* file_info);
 static int create_connection();
 static void close_connection();
-static fountain_s* from_network();
+static fountain_s* get_ftn_from_network(int section);
 static int get_remote_file_info(struct file_info_s*);
 static void platform_truncate(const char* filename, int length);
 __attribute__((malloc)) static char* sanitize_path(const char* unsafepath);
@@ -73,7 +74,7 @@ static char * outfilename = NULL;
 static char* netbuf = NULL;
 static int netbuf_len;
 
-static int filesize_in_blocks = 0;
+static int section_size_in_blocks = -1;
 
 // ------ functions ------
 static void print_usage_and_exit(int status) {
@@ -146,6 +147,7 @@ int main(int argc, char** argv) {
         goto shutdown;
     }
     debug("Downloading %s", file_info.filename);
+    odebug("%d", file_info.section_size);
     odebug("%d", file_info.blk_size);
     if (file_info.blk_size > MAX_BLOCK_SIZE) {
         log_err("Block size (%"PRId16") larger than allowed: %d",
@@ -175,9 +177,9 @@ int main(int argc, char** argv) {
     // when we introduce memory mapped files into the equation
     platform_truncate(outfilename, file_info.blk_size * file_info.num_blocks);
 
-    filesize_in_blocks = file_info.num_blocks;
+    section_size_in_blocks = file_info.section_size;
     // do { get some packets, try to decode } while ( not decoded )
-    if (proc_file(from_network, &file_info) < 0)
+    if (proc_file(&file_info) < 0)
         goto shutdown;
 
     platform_truncate(outfilename, file_info.filesize);
@@ -302,29 +304,32 @@ void close_connection() {
 }
 
 static void packet_order_for_network(packet_s* packet) {
-    packet->magic = htonl(packet->magic);
+    fp_to(packet->magic);
 }
 //static void packet_order_from_network(packet_s* packet) {
 //    packet->magic = ntohl(packet->magic);
 //}
 
 static void file_info_order_from_network(file_info_s* info) {
-    info->magic = ntohl(info->magic);
-    info->blk_size = ntohs(info->blk_size);
-    info->num_blocks = ntohs(info->num_blocks);
-    info->filesize = ntohl(info->filesize);
+    fp_from(info->magic);
+    fp_from(info->blk_size);
+    fp_from(info->num_blocks);
+    fp_from(info->filesize);
+    fp_from(info->section_size);
 }
 
 static void wait_signal_order_for_network(wait_signal_s* wait_signal) {
-    wait_signal->magic = htonl(wait_signal->magic);
-    wait_signal->capacity = htonl(wait_signal->capacity);
+    fp_to(wait_signal->magic);
+    fp_to(wait_signal->capacity);
+    fp_to(wait_signal->section);
 }
 
 
-static int send_wait_signal(int capacity) {
+static int send_wait_signal(int capacity, int section) {
     wait_signal_s msg = {
         .magic = MAGIC_WAITING,
-        .capacity = (int32_t)capacity
+        .capacity = (int16_t)capacity,
+        .section = (uint16_t)section
     };
     debug("Sending wait signal with capacity = %d", capacity);
     wait_signal_order_for_network(&msg);
@@ -403,8 +408,12 @@ static void ftn_cache_alloc(ftn_cache_s* cache) {
     cache->base = malloc(BURST_SIZE * sizeof *cache->base);
     if (cache->base == NULL) return;
 
-    cache->capacity = BURST_SIZE;
+    if (section_size_in_blocks > 0)
+        cache->capacity = 4 * section_size_in_blocks;
+    else
+        cache->capacity = BURST_SIZE;
     cache->current = cache->base;
+    cache->section = 0;
 }
 
 static void handle_pollevents(struct pollfd* pfd) {
@@ -417,7 +426,7 @@ static void handle_pollevents(struct pollfd* pfd) {
         log_err("POLLNVAL: Invalid socket");
 }
 
-static void load_from_network(ftn_cache_s* cache) {
+static void load_from_network(ftn_cache_s* cache, int section) {
 
     struct pollfd pfd = {
         .fd = s,
@@ -435,7 +444,7 @@ static void load_from_network(ftn_cache_s* cache) {
         return;
     }
     if (pollret1 == 0)
-        send_wait_signal(cache->capacity - cache->size);
+        send_wait_signal(cache->capacity - cache->size, section);
 
     static const int max_timeout = 15000;
     int timeout = 10;
@@ -458,7 +467,7 @@ static void load_from_network(ftn_cache_s* cache) {
                             (double)max_timeout / 1000.0);
                     return;
                 }
-                send_wait_signal(cache->capacity);
+                send_wait_signal(cache->capacity, section);
                 timeout <<= 1;
                 continue;
             }
@@ -483,7 +492,9 @@ static void load_from_network(ftn_cache_s* cache) {
             .length = bytes_recvd,
             .buffer = netbuf
         };
-        fountain_s* ftn = unpack_fountain(packet, filesize_in_blocks);
+        // FIXME: section_size_in_blocks is only valid for sections
+        // up to n -1. the last section may have less blocks
+        fountain_s* ftn = unpack_fountain(packet, section_size_in_blocks);
         if (ftn == NULL) { // Checksum may have failed
             // If the system runs out of memory this may become an infinite
             // loop... we could create an int offset instead of using
@@ -492,23 +503,40 @@ static void load_from_network(ftn_cache_s* cache) {
             // error code instead
             continue;
         }
+        if (ftn->section != section) {
+            // Must be an old packet from a previous request
+            debug("discarding fountain from section %d", ftn->section);
+            free_fountain(ftn);
+            continue;
+        }
         cache->base[i++] = ftn;
         cache->size++;
         debug("Cache size is now %d", cache->size);
     }
     cache->current = cache->base;
+    cache->section = section;
 }
 
-fountain_s* from_network() {
+fountain_s* get_ftn_from_network(int section) {
     static ftn_cache_s cache = {};
     if (cache.base == NULL) {
         ftn_cache_alloc(&cache);
         if (cache.base == NULL) return NULL;
     }
 
+    if (cache.section != section) {
+        while (cache.size > 0) {
+            fountain_s* to_delete = *cache.current;
+            *cache.current++ = NULL;
+            --cache.size;
+            free_fountain(to_delete);
+        }
+        assert(cache.size == 0);
+    }
+
     if (cache.size == 0) {
         debug("Cache size 0 - loading from network...");
-        load_from_network(&cache);
+        load_from_network(&cache, section);
         if (cache.size == 0) return NULL;
     }
 
@@ -518,48 +546,76 @@ fountain_s* from_network() {
     return output;
 }
 
+static int file_info_bytes_per_section(file_info_s* info)
+{
+    return info->blk_size * info->section_size;
+}
+static int file_info_calc_num_sections(file_info_s* info)
+{
+    int bytes_per_section = file_info_bytes_per_section(info);
+    return (info->filesize + bytes_per_section - 1) / bytes_per_section;
+}
+
 /* process fountains as they come down the wire
    returns a status code (see errors.c)
  */
-int proc_file(fountain_src ftn_src, file_info_s* file_info) {
+int proc_file(file_info_s* file_info) {
     int result = 0;
     char * err_str = NULL;
 
-    decodestate_s* state =
-        decodestate_new(file_info->blk_size, file_info->num_blocks);
-    if (!state) return handle_error(ERR_MEM, NULL);
-
-    decodestate_s* tmp_ptr;
-    tmp_ptr = realloc(state, sizeof(memdecodestate_s));
-    if (tmp_ptr) state = tmp_ptr;
-    else { result = ERR_MEM; goto free_state; }
-
-    state->filename = memdecodestate_filename;
     char* file_mapping = map_file(outfilename);
     if (!file_mapping) {
-        result = ERR_MAP;
-        err_str = outfilename;
-        goto free_state;
+        return handle_error(ERR_MAP, outfilename);
     }
 
-    ((memdecodestate_s*)state)->result = file_mapping;
+    uint64_t total_packets = 0;
 
-    fountain_s* ftn = NULL;
-    do {
-        ftn = ftn_src();
-        if (!ftn) goto cleanup;
-        state->packets_so_far++;
-        result = memdecode_fountain((memdecodestate_s*)state, ftn);
-        free_fountain(ftn);
-        if (result < 0) goto cleanup;
-    } while (!decodestate_is_decoded(state));
+    // TODO: some sort of loop over the number of sections
+    int num_sections = file_info_calc_num_sections(file_info);
+    odebug("%d", num_sections);
+    int bytes_per_section = file_info_bytes_per_section(file_info);
+    odebug("%d", bytes_per_section);
+    for (int section_num = 0; section_num < num_sections; section_num++) {
+        int num_blocks_in_section;
+        if (1 + section_num == num_sections) {
+            num_blocks_in_section = file_info->num_blocks % file_info->section_size;
+        } else {
+            num_blocks_in_section = file_info->section_size;
+        }
+        decodestate_s* state =
+            decodestate_new(file_info->blk_size, num_blocks_in_section);
+        if (!state) return handle_error(ERR_MEM, NULL);
 
-    log_info("Total packets required for download: %d", state->packets_so_far);
+        decodestate_s* tmp_ptr;
+        tmp_ptr = realloc(state, sizeof(memdecodestate_s));
+        if (tmp_ptr) state = tmp_ptr;
+        else { result = ERR_MEM; goto cleanup; }
 
+        state->filename = memdecodestate_filename;
+
+        ((memdecodestate_s*)state)->result = file_mapping + (section_num * bytes_per_section);
+
+        fountain_s* ftn = NULL;
+        do {
+            ftn = get_ftn_from_network(section_num);
+            if (!ftn) goto cleanup;
+            state->packets_so_far++;
+            result = memdecode_fountain((memdecodestate_s*)state, ftn);
+            free_fountain(ftn);
+            if (result < 0) goto cleanup;
+        } while (!decodestate_is_decoded(state));
+
+        log_info("Packets required for section: %d", state->packets_so_far);
+        total_packets += state->packets_so_far;
 cleanup:
+        if (state)
+            decodestate_free(state);
+        if (result < 0 || !ftn)
+            break;
+    }
+    log_info("Total packets required for download: %"PRIu64, total_packets);
+
     if (file_mapping) unmap_file(file_mapping);
-free_state:
-    decodestate_free(state);
     return handle_error(result, err_str);
 }
 

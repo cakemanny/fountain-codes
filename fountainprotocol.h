@@ -27,8 +27,9 @@ typedef struct info_request_s {
 typedef struct file_info_s {
     int32_t magic;          // Should always be MAGIC_INFO
     int16_t blk_size;
-    int16_t num_blocks;     // FIXME: This is way too small...
+    int16_t num_blocks;     // TODO: remove. This is redundant, can calculate
     int32_t filesize;       // The actual size in bytes
+    int16_t section_size;   // number of blocks per section
     char filename[256];
 } file_info_s;
 
@@ -39,10 +40,21 @@ typedef struct file_info_s {
 
 typedef struct wait_signal_s {
     int32_t magic;
-    int32_t capacity; // This could probably be an int16_t ...
+    int16_t capacity; // This could probably be an int16_t ...
+    uint16_t section;
 } wait_signal_s;
 
-#define fp_from(x)  x = _Generic((x), int16_t: ntohs(x), int32_t: ntohl(x))
-#define fp_to(x)  x = _Generic((x), int16_t: htons(x), int32_t: htonl(x))
+#define fp_from(x)  x = _Generic((x)\
+        , int16_t: ntohs(x)\
+        , uint16_t: ntohs(x)\
+        , int32_t: ntohl(x)\
+        , uint32_t: ntohl(x)\
+        )
+#define fp_to(x)  x = _Generic((x)\
+        , int16_t: htons(x)\
+        , uint16_t: htons(x)\
+        , int32_t: htonl(x)\
+        , uint32_t: htonl(x)\
+        )
 
 #endif /* __FOUNTAINPROTOCOL_H__ */

@@ -11,8 +11,9 @@
 /* ------ Structure definitions ------ */
 
 typedef struct fountain_s {
-    int32_t num_blocks;
-    int32_t blk_size;
+    int32_t num_blocks; // This doesn't really need to be so large
+    int16_t blk_size;
+    uint16_t section;
     uint64_t seed;
     char* string;   // TODO: rename this "data"
     size_t block_set_len;
@@ -22,7 +23,7 @@ typedef struct fountain_s {
 /* We don't want to send the pointers across the network as they will have
  * different sizes on different systems
  */
-#define FTN_HEADER_SIZE (2 * sizeof(int32_t) + sizeof(uint64_t))
+#define FTN_HEADER_SIZE (sizeof(int32_t) + sizeof(int16_t) + sizeof(uint16_t) + sizeof(uint64_t))
 
 /* include the checksum at the beginning */
 #define MAX_PACKED_FTN_SIZE (sizeof(int16_t) + FTN_HEADER_SIZE + MAX_BLOCK_SIZE)
@@ -65,8 +66,8 @@ extern char* memdecodestate_filename;
  * \param length The length of the block of memory
  * \returns pointer to a new fountain_s
  */
-fountain_s* make_fountain(const char* string, int blk_size, size_t length) __malloc; /* allocs memory */
-fountain_s* fmake_fountain(FILE* f, int blk_size) __malloc; /* allocs memory */
+fountain_s* make_fountain(const char* string, int blk_size, size_t length, int section) __malloc; /* allocs memory */
+fountain_s* fmake_fountain(FILE* f, int blk_size, int section, int section_size) __malloc; /* allocs memory */
 void free_fountain(fountain_s* ftn);
 int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2);
 char* decode_fountain(const char* string, int blk_size);
@@ -111,7 +112,7 @@ buffer_s pack_fountain(fountain_s* ftn);
 
    returns A pointer to the deserialized fountain or NULL on failure
 */
-fountain_s* unpack_fountain(buffer_s packet, int filesize_in_blocks) __malloc;
+fountain_s* unpack_fountain(buffer_s packet, int section_size_in_blocks) __malloc;
 
 /* ============ packethold_s functions  ==================================== */
 packethold_s* packethold_new() __malloc; /* allocs memory */
