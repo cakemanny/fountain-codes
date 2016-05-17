@@ -26,7 +26,7 @@
 
 #define DEFAULT_PORT 2534
 #define DEFAULT_IP "127.0.0.1"
-#define BURST_SIZE 100
+#define BURST_SIZE 1000
 
 // ------ types ------
 typedef struct server_s {
@@ -407,13 +407,13 @@ int get_remote_file_info(file_info_s* file_info) {
 }
 
 static void ftn_cache_alloc(ftn_cache_s* cache) {
-    cache->base = malloc(BURST_SIZE * sizeof *cache->base);
-    if (cache->base == NULL) return;
-
     if (section_size_in_blocks > 0)
-        cache->capacity = 4 * section_size_in_blocks;
+        cache->capacity = 8 * section_size_in_blocks;
     else
         cache->capacity = BURST_SIZE;
+    cache->base = malloc(cache->capacity * sizeof *cache->base);
+    if (cache->base == NULL) return;
+
     cache->current = cache->base;
     cache->section = 0;
 }
