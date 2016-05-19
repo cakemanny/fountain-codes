@@ -33,7 +33,7 @@ ifdef RELEASE
   endif # Platform
 
 else # Not RELEASE
-  CFLAGS=-g -Wall -c -O0 -fms-extensions
+  CFLAGS=-g -Wall -c -O0 -fms-extensions -march=native
   LDFLAGS=
 endif # End RELEASE-IF
 

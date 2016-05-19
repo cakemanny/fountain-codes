@@ -37,14 +37,12 @@ static int filesize(char const * filename) {
 static int fsize_in_blocks(char const * filename) {
     int fsize = filesize(filename);
     if (fsize < 0) return fsize;
-    return (fsize % blk_size)
-        ? (fsize / blk_size) + 1 : fsize / blk_size;
+    return (fsize + blk_size - 1) / blk_size;
 }
 
 static int size_in_blocks(const char* string, int blk_size) {
     int string_len = strlen(string);
-    return (string_len % blk_size)
-        ? (string_len / blk_size) + 1 : string_len / blk_size;
+    return (string_len + blk_size - 1) / blk_size;
 }
 
 static fountain_s* from_file() {

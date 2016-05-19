@@ -17,7 +17,11 @@ typedef struct fountain_s {
     uint64_t seed;
     char* string;   // TODO: rename this "data"
     size_t block_set_len;
+#ifdef __x86_64__
+    uint64_t* block_set;
+#else
     uint32_t* block_set; // Use bitset on receiving end
+#endif
 } fountain_s;
 
 /* We don't want to send the pointers across the network as they will have

@@ -9,11 +9,13 @@
 #include <stdbool.h>
 #include <math.h>
 #include <assert.h>
+#include <x86intrin.h>
 #include "errors.h"
 #include "platform.h"
 #include "fountain.h"
 #include "dbg.h"
 #include "randgen.h"
+#include "bitset.h"
 
 #if !defined(__clang__) && !defined(__has_builtin)
 #   if defined(__GNUC__)
@@ -27,10 +29,6 @@
 #define SETBIT(x, i) (x)[(i)>>3] |= (1<<((i)&7))
 #define CLEARBIT(x, i) (x)[(i)>>3] &= (1<<((i)&7)) ^ 0xFF
 
-/* Int-based bitset? Use uint32_t */
-#define IsBitSet(x, i) (( (x)[(i)>>5] & (1<<((i)&31)) ) != 0)
-#define SetBit(x, i) (x)[(i)>>5] |= (1<<((i)&31))
-#define ClearBit(x, i) (x)[(i)>>5] &= (1<<((i)&31)) ^ 0xFFFFFFFF
 
 #define BUFFER_SIZE 256
 
@@ -46,7 +44,8 @@ static char * xorncpy (char* destination, const char* source, register size_t n)
     return (destination);
 }
 
-#if !__has_builtin(__builtin_ctz) /* We only use these if we don't has ffs */
+#ifndef HAVE_CTZ
+/* We only use these if we don't has ffs */
 static const char LogTable256[256] =
 {
 #define LT(n) n, n, n, n, n, n, n, n, n, n, n, n, n, n, n, n
@@ -56,7 +55,7 @@ static const char LogTable256[256] =
 };
 
 
-static unsigned int log2i(unsigned int v) { // 32-bit word to find the log of
+static unsigned int log2i_32(unsigned int v) { // 32-bit word to find the log of
     register unsigned int t, tt; // temporaries
     if ((tt = v >> 16)) {
         return (t = tt >> 8) ? 24 + LogTable256[t] : 16 + LogTable256[tt];
@@ -64,7 +63,18 @@ static unsigned int log2i(unsigned int v) { // 32-bit word to find the log of
         return (t = v >> 8) ? 8 + LogTable256[t] : LogTable256[v];
     }
 }
-#endif /*__builtin_ctz*/
+
+#ifdef __x86_64__
+static uint64_t log2i_64(uint64_t v) {
+    register uint64_t t;
+    return ((t = v >> 32)) ? 32 + log2i_32(t) : log2i_32(v);
+}
+#   define log2i(x)     log2i_64(x)
+#else
+#   define log2i(x)     log2i_32(x)
+#endif
+
+#endif /*HAVE_CTZ*/
 
 static int size_in_blocks(int string_len, int blk_size) {
     return (string_len + blk_size - 1) / blk_size;
@@ -107,9 +117,9 @@ static void seeded_select_blocks(int* blocks, int n, int d, uint64_t seed) {
  * Same as seeded_select_blocks but creates a bitset rather than an array of
  * the block numbers
  */
-static uint32_t* seeded_select_blockset(int n, int d, uint64_t seed) {
+static bset seeded_select_blockset(int n, int d, uint64_t seed) {
     assert( d <= n );
-    uint32_t* block_set = calloc((n + 31) / 32, sizeof *block_set);
+    bset block_set = bset_alloc(n);
     check_mem(block_set);
 
     for (int i = 0; i < d; i++) {
@@ -214,7 +224,7 @@ fountain_s* make_fountain(const char* string, int blk_size, size_t length, int s
     output->block_set =
         seeded_select_blockset(n, output->num_blocks, output->seed);
     if (!output->block_set) goto free_ftn;
-    output->block_set_len = (n + 31) / 32;
+    output->block_set_len = bset_len(n);
     output->section = section;
 
     return output;
@@ -275,21 +285,20 @@ void print_fountain(const fountain_s * ftn) {
     printf("{ num_blocks: %"PRId32", blk_size: %"PRId16", section: %"PRIu16", seed: %"PRIu64", blocks: ",
             ftn->num_blocks, ftn->blk_size, ftn->section, ftn->seed);
     for (int i = 0; i < ftn->block_set_len; i++)
-        printf("%x", ftn->block_set[i]);
+        printf("%"PRIbset, ftn->block_set[i]);
     printf("}\n");
 }
 
 /* Helper Methods for working with block_set */
 // Assumes we know that there is exactly one bit set in the bitset
-static int blockset_single_block_num(uint32_t* block_set) {
+static int blockset_single_block_num(bset block_set) {
     int i = 0;
     while (!block_set[i]) i++;
-#if __has_builtin(__builtin_ctz) /* Count-trailing-zeroes
-                                    Will yield same result for our input */
-    return i * 32 + __builtin_ctz(block_set[i]);
+#ifdef HAVE_CTZ /* Count-trailing-zeroes Will yield same result for our input */
+    return i * BSET_BITS + ctz(block_set[i]);
 #else
-    return i * 32 + log2i(block_set[i]);
-#endif
+    return i * BSET_BITS + log2i(block_set[i]);
+#endif // HAVE_CTZ
 }
 
 /*
@@ -297,25 +306,25 @@ static int blockset_single_block_num(uint32_t* block_set) {
  * including starting_index.
  * This should give same result as while (!IsBitSet(block_set[j], j)) j++;
  */
-static int blockset_lowest_set_above(uint32_t* block_set, int block_set_len, int starting_index) {
-    int j = starting_index;
-#if __has_builtin(__builtin_ctz)
-    int k = j>>5; // Index of integer to check
-    int x = 1<<(j&31);
-    int mask = x | ~(x - 1);
+static int blockset_lowest_set_above(bset block_set, int block_set_len, int starting_index) {
+    bset_int j = starting_index;
+#ifdef HAVE_CTZ
+    bset_int k = j >> BSET_BITS_W; // Index of integer to check
+    bset_int x = 1 << (j & (BSET_BITS-1));
+    bset_int mask = x | ~(x - 1);
     while (!(block_set[k] & mask) && k < block_set_len) {
         k += 1;
-        j = k<<5;
+        j = k << BSET_BITS_W;
         mask = ~0;
     }
     return (k < block_set_len)
-        ? (j & ~31) + __builtin_ctz(block_set[k] & mask)
+        ? (j & ~(BSET_BITS-1)) + ctz(block_set[k] & mask)
         : -1;
 #else
-    while (!IsBitSet(block_set, j) && (j>>5) < block_set_len)
+    while (!IsBitSet(block_set, j) && (j >> BSET_BITS_W) < block_set_len)
         j++;
-    return (j<<5) < block_set_len ? j : -1;
-#endif
+    return (j << BSET_BITS_W) < block_set_len ? j : -1;
+#endif // HAVE_CTZ
 }
 
 
@@ -330,17 +339,49 @@ static int blockset_lowest_set_above(uint32_t* block_set, int block_set_len, int
 //    }
 //    return (from >= 0);
 //}
+typedef long long v4si __attribute__((vector_size (16)));
+typedef long long v8si __attribute__((vector_size (32)));
+
+static inline bool issubset_bit128(v4si sub, v4si super) {
+    v4si result = (sub & super) ^ sub;
+    return (result[0] | result[1]) == 0;
+}
+static inline bool issubset_bit256(v8si sub, v8si super) {
+    v8si result = (sub & super) ^ sub;
+    return (result[0] | result[1] | result[2] | result[3]) == 0;
+}
+static inline bool issubset_bit512(const bset sub, const bset super)
+{
+    return (__andn_u64(super[0],sub[0])
+        | __andn_u64(super[1],sub[1])
+        | __andn_u64(super[2],sub[2])
+        | __andn_u64(super[3],sub[3])
+        | __andn_u64(super[4],sub[4])
+        | __andn_u64(super[5],sub[5])
+        | __andn_u64(super[6],sub[6])
+        | __andn_u64(super[7],sub[7])
+        | __andn_u64(super[8],sub[8])) == 0;
+}
 
 static bool fountain_issubset_bit(const fountain_s* sub, const fountain_s* super) {
     assert( sub->section == super->section );
+    assert( sub->block_set_len == super->block_set_len );
     // if we have a subset then sub[i] & super[i] == sub[i] forall i
     // so if result is still 0 at end then this is true
-    uint32_t result = 0;
-    int len = super->block_set_len;
-    for (int i = 0; i < len; i++) {
-        result |= ((sub->block_set[i] & super->block_set[i]) ^ sub->block_set[i]);
+    switch (super->block_set_len) {
+#ifdef __x86_64__
+        case 2:
+            return issubset_bit128(*((v4si*)sub->block_set), *((v4si*)super->block_set));
+        case 4: // We seem to be getting segfaults on this one
+            return issubset_bit256(*((v8si*)sub->block_set), *((v8si*)super->block_set));
+        case 8:
+            return issubset_bit512(sub->block_set, super->block_set);
+#endif
+        case 1:
+            return (~*super->block_set & *sub->block_set) == 0;
+    default:
+        return issubset_bit(sub->block_set, super->block_set, super->block_set_len);
     }
-    return !result;
 }
 
 /*
@@ -420,6 +461,7 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
         // Case one, block size one
         if (ftn->num_blocks == 1) {
             const int blk_num = blockset_single_block_num(ftn->block_set);
+            assert( blk_num >= 0 );
             if (blkdec[blk_num] == 0) {
                 if (bwrite(ftn->string, blk_num, state) != 1)
                     return ERR_BWRITE;
@@ -696,7 +738,7 @@ fountain_s* unpack_fountain(buffer_s packet, int section_size_in_blocks) {
     ftn->block_set = seeded_select_blockset(section_size_in_blocks,
                                             ftn->num_blocks, ftn->seed);
     if (!ftn->block_set) goto free_string;
-    ftn->block_set_len = (section_size_in_blocks + 31) / 32;
+    ftn->block_set_len = bset_len(section_size_in_blocks);
 
     return ftn;
 free_string:
@@ -833,7 +875,7 @@ void packethold_print(packethold_s* hold) {
         else
             fprintf(stderr, "  ");
         for (int j = 0; j < ftn->block_set_len; j++)
-            fprintf(stderr, "%x", ftn->block_set[j]);
+            fprintf(stderr, "%"PRIbset, ftn->block_set[j]);
         fprintf(stderr, "\n");
     }
     fprintf(stderr, "==== End P-Hold ====\n\n");
@@ -906,8 +948,8 @@ int main(int argc, char** argv) {
     {
         bool passed = true;
         printf("Testing SetBit and IsBitSet...\n");
-        for (i = 0; i < 4*32 && passed; i++) {
-            uint32_t bitset[5] = {};
+        for (i = 0; i < 4*BSET_BITS && passed; i++) {
+            bset_int bitset[5] = {};
             SetBit(bitset, i);
             if (!IsBitSet(bitset, i))
                 passed = false;
@@ -924,10 +966,10 @@ int main(int argc, char** argv) {
     {
         bool passed = true;
         printf("Testing blockset_single_block_num...\n");
-        for (i = 0; i < 4*32 && passed; i++) {
-            uint32_t bitset[5] = {};
+        for (i = 0; i < 4*BSET_BITS && passed; i++) {
+            bset_int bitset[5] = {};
             SetBit(bitset, i);
-            uint32_t block_num = blockset_single_block_num(bitset);
+            bset_int block_num = blockset_single_block_num(bitset);
             if (block_num != i)
                 passed = false;
             ClearBit(bitset, i);
@@ -941,15 +983,15 @@ int main(int argc, char** argv) {
         bool passed = true;
         int j = 0, expected = 0, actual = 0;
         printf("Testing blockset_lowest_set_above...\n");
-        for (i = 0; i < 4*32 && passed; i+=7) {
-            for (j = 0; j < 4*32 && passed; j++) {
-                uint32_t bitset[5] = {};
+        for (i = 0; i < 4*BSET_BITS && passed; i+=7) {
+            for (j = 0; j < 4*BSET_BITS && passed; j++) {
+                bset_int bitset[5] = {};
                 SetBit(bitset, i);
 
                 expected = j;
-                while (!IsBitSet(bitset, expected) && expected < 4*32)
+                while (!IsBitSet(bitset, expected) && expected < 4*BSET_BITS)
                     expected++;
-                if (expected == 4 * 32) expected = -1;
+                if (expected == 4 * BSET_BITS) expected = -1;
 
                 actual = blockset_lowest_set_above(bitset, 5, j);
                 if (actual != expected)
