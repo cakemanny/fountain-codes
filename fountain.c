@@ -825,7 +825,7 @@ static int packethold_popcount(const packethold_s* hold)
     int num_deleted = 0;
     int len = (hold->num_packets + 7) / 8;
     for (int i = 0; i < len; i++) {
-        num_deleted += __builtin_popcount(hold->deleted[i]);
+        num_deleted += __builtin_popcount((unsigned char)hold->deleted[i]);
     }
     return hold->num_packets - num_deleted;
 }
@@ -860,27 +860,19 @@ void packethold_collect_garbage(packethold_s* hold)
 
     debug("Collecting garbage: %d", ++gc_count);
 
-    fountain_s* current_list = hold->fountain;
-    //int space = max(popcount + (popcount >> 1), BUFFER_SIZE);
-    //hold->fountain = malloc(space * sizeof *hold->fountain);
-    //check_mem(hold->fountain);
-    //hold->num_slots = space;
-    //int new_bitset_len = (space + 7) / 8;
-
-    char* old_mark = hold->mark;
-    //hold->mark = calloc(new_bitset_len, sizeof *hold->mark);
-    //check_mem(hold->mark);
+    fountain_s* ftns = hold->fountain;
 
     char* deleted = hold->deleted;
-    fountain_s* end = hold->fountain;
     char* mark = hold->mark;
     int mp = 0; // mark position
     int i = 0;
-    while (!ISBITSET(deleted, i)) i++;
+    // Skip over stuff that is not deleted
+    while (!ISBITSET(deleted, i)) { i++; mp++; };
+    // back copy anything that is not deleted
     for (; i < hold->num_packets; i++) {
         if (!ISBITSET(deleted, i)) {
-            *end++ = current_list[i];
-            if (ISBITSET(old_mark, i)) {
+            ftns[mp] = ftns[i];
+            if (ISBITSET(mark, i)) {
                 SETBIT(mark, mp);
             } else {
                 CLEARBIT(mark, mp);
@@ -888,17 +880,10 @@ void packethold_collect_garbage(packethold_s* hold)
             mp++;
         }
     }
-    assert(end - hold->fountain == popcount);
+    assert(mp == popcount);
     hold->num_packets = hold->offset = popcount;
-    //free(current_list);
-    //free(old_mark);
 
-    //hold->deleted = realloc(hold->deleted, new_bitset_len);
-    //check_mem(hold->deleted);
-    //memset(hold->deleted, 0, new_bitset_len);
-    return;
-error:
-    exit(1);
+    memset(hold->deleted, 0, (hold->num_slots + 7) / 8);
 }
 
 int packethold_add(packethold_s* hold, fountain_s* ftn) {
