@@ -339,6 +339,8 @@ static int blockset_lowest_set_above(bset block_set, int block_set_len, int star
 //    }
 //    return (from >= 0);
 //}
+
+#ifdef __AVX__
 typedef long long v4si __attribute__((vector_size (16)));
 typedef long long v8si __attribute__((vector_size (32)));
 
@@ -350,6 +352,15 @@ static inline bool issubset_bit256(v8si sub, v8si super) {
     v8si result = (sub & super) ^ sub;
     return (result[0] | result[1] | result[2] | result[3]) == 0;
 }
+#endif
+
+#ifndef GCC_VERSION
+#define GCC_VERSION (__GNUC__ * 10000 \
+                     + __GNUC_MINOR__ * 100 \
+                     + __GNUC_PATCHLEVEL__)
+#endif
+
+#if GCC_VERSION >= 40900 && defined(__AVX__)
 static inline bool issubset_bit512(const bset sub, const bset super)
 {
     return (__andn_u64(super[0],sub[0])
@@ -362,6 +373,7 @@ static inline bool issubset_bit512(const bset sub, const bset super)
         | __andn_u64(super[7],sub[7])
         | __andn_u64(super[8],sub[8])) == 0;
 }
+#endif
 
 static bool fountain_issubset_bit(const fountain_s* sub, const fountain_s* super) {
     assert( sub->section == super->section );
@@ -369,13 +381,15 @@ static bool fountain_issubset_bit(const fountain_s* sub, const fountain_s* super
     // if we have a subset then sub[i] & super[i] == sub[i] forall i
     // so if result is still 0 at end then this is true
     switch (super->block_set_len) {
-#ifdef __x86_64__
+#if defined(__x86_64__) && defined(__AVX__)
         case 2:
             return issubset_bit128(*((v4si*)sub->block_set), *((v4si*)super->block_set));
         case 4: // We seem to be getting segfaults on this one
             return issubset_bit256(*((v8si*)sub->block_set), *((v8si*)super->block_set));
+#   if GCC_VERSION >= 40900
         case 8:
             return issubset_bit512(sub->block_set, super->block_set);
+#   endif
 #endif
         case 1:
             return (~*super->block_set & *sub->block_set) == 0;
@@ -847,36 +861,41 @@ void packethold_collect_garbage(packethold_s* hold)
     debug("Collecting garbage: %d", ++gc_count);
 
     fountain_s* current_list = hold->fountain;
-    int space = max(popcount + (popcount >> 1), BUFFER_SIZE);
-    hold->fountain = malloc(space * sizeof *hold->fountain);
-    check_mem(hold->fountain);
-    hold->num_slots = space;
-    int new_bitset_len = (space + 7) / 8;
+    //int space = max(popcount + (popcount >> 1), BUFFER_SIZE);
+    //hold->fountain = malloc(space * sizeof *hold->fountain);
+    //check_mem(hold->fountain);
+    //hold->num_slots = space;
+    //int new_bitset_len = (space + 7) / 8;
 
     char* old_mark = hold->mark;
-    hold->mark = calloc(new_bitset_len, sizeof *hold->mark);
-    check_mem(hold->mark);
+    //hold->mark = calloc(new_bitset_len, sizeof *hold->mark);
+    //check_mem(hold->mark);
 
     char* deleted = hold->deleted;
     fountain_s* end = hold->fountain;
     char* mark = hold->mark;
     int mp = 0; // mark position
-    for (int i = 0; i < hold->num_packets; i++) {
+    int i = 0;
+    while (!ISBITSET(deleted, i)) i++;
+    for (; i < hold->num_packets; i++) {
         if (!ISBITSET(deleted, i)) {
             *end++ = current_list[i];
             if (ISBITSET(old_mark, i)) {
                 SETBIT(mark, mp);
+            } else {
+                CLEARBIT(mark, mp);
             }
             mp++;
         }
     }
+    assert(end - hold->fountain == popcount);
     hold->num_packets = hold->offset = popcount;
-    free(current_list);
-    free(old_mark);
+    //free(current_list);
+    //free(old_mark);
 
-    hold->deleted = realloc(hold->deleted, new_bitset_len);
-    check_mem(hold->deleted);
-    memset(hold->deleted, 0, new_bitset_len);
+    //hold->deleted = realloc(hold->deleted, new_bitset_len);
+    //check_mem(hold->deleted);
+    //memset(hold->deleted, 0, new_bitset_len);
     return;
 error:
     exit(1);
@@ -898,8 +917,23 @@ int packethold_add(packethold_s* hold, fountain_s* ftn) {
         if (!mark_tmp_ptr) {
             handle_error(REALLOC_ERR, NULL);
             return REALLOC_ERR;
-        } else
+        } else {
             hold->mark = mark_tmp_ptr;
+            int old_len = (hold->num_slots + 7) / 8;
+            int new_len = (space + 7) / 8;
+            memset(hold->mark  + old_len, 0, new_len - old_len);
+        }
+
+        char* deleted_tmp = realloc(hold->deleted, (space + 7) / 8);
+        if (!deleted_tmp) {
+            return handle_error(REALLOC_ERR, NULL);
+        } else {
+            hold->deleted = deleted_tmp;
+            // initialize the new memory
+            int old_len = (hold->num_slots + 7) / 8;
+            int new_len = (space + 7) / 8;
+            memset(hold->deleted + old_len, 0, new_len - old_len);
+        }
 
         hold->num_slots = space;
     }

@@ -31,7 +31,7 @@ rm -f $output
 SERVID_PID=$!
 
 echo Waiting for server to setup...
-sleep 2
+sleep 1
 echo Starting client
 
 starttime=$(date +"%s")

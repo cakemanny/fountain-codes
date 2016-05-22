@@ -43,6 +43,15 @@ typedef struct wait_signal_s {
     uint16_t section;
 } wait_signal_s;
 
+#ifndef GCC_VERSION
+#define GCC_VERSION (__GNUC__ * 10000 \
+                     + __GNUC_MINOR__ * 100 \
+                     + __GNUC_PATCHLEVEL__)
+#endif
+
+// Test for GCC 4.8.*
+#if GCC_VERSION >= 40800
+
 #define fp_from(x)  x = _Generic((x)\
         , int16_t: ntohs(x)\
         , uint16_t: ntohs(x)\
@@ -55,5 +64,12 @@ typedef struct wait_signal_s {
         , int32_t: htonl(x)\
         , uint32_t: htonl(x)\
         )
+#else
+//#define typeof(x)       __typeof__(x)
+#define TEQ(t1, t2)     __builtin_types_compatible_p(t1, t2)
+#define cexpr(C,E1,E2)  __builtin_choose_expr(C,E1,E2)
+#define fp_from(x)   x = cexpr(sizeof(x)==2, ntohs(x), cexpr(sizeof(x)==4, ntohl(x), (void)0))
+#define fp_to(x)     x = cexpr(sizeof(x)==2, htons(x), cexpr(sizeof(x)==4, htonl(x), (void)0))
+#endif // GCC_VERSION
 
 #endif /* __FOUNTAINPROTOCOL_H__ */

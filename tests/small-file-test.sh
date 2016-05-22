@@ -37,7 +37,7 @@ rm -f testfile2.txt
 SERVID_PID=$!
 
 echo Waiting to server to set itself up...
-sleep 3
+sleep 1
 echo Starting client
 
 ../client --output=testfile2.txt 2>/dev/null
