@@ -38,7 +38,7 @@ else # Not RELEASE
 endif # End RELEASE-IF
 
 ifdef PROFILE
-  CFLAGS=-pg -Wall -c -O0 -fms-extensions
+  CFLAGS=-pg -Wall -c -O0 -fms-extensions -march=native
   LDFLAGS=-pg
 endif
 

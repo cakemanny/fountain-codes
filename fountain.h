@@ -38,13 +38,14 @@ typedef struct packethold_s {
     fountain_s * fountain; /**< an array of held packets */
     size_t offset;
     char* mark; /* bitset for mark algorithm */
+    char* deleted; /* bitset for marking packets as deleted */
 } packethold_s;
 
 /** This is the structure we keep the state of our decoding in. */
 typedef struct decodestate_s {
     int blk_size;
     int num_blocks;
-    char* blkdecoded;
+    char* blkdecoded;   // TODO: probably ought to change to bitset
     packethold_s* hold;
     int packets_so_far;
     char* filename; /* must be in wb+ mode */
@@ -135,6 +136,8 @@ fountain_s* packethold_remove(packethold_s* hold, int pos, fountain_s* output); 
 int packethold_add(packethold_s* hold, fountain_s* ftn);
 
 void packethold_print(packethold_s* hold);
+
+void packethold_collect_garbage(packethold_s* hold);
 
 /* ============ decodestate_s functions ==================================== */
 

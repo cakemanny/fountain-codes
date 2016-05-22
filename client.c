@@ -580,6 +580,9 @@ int proc_file(file_info_s* file_info) {
             decodestate_new(file_info->blk_size, file_info->section_size);
         if (!state) return handle_error(ERR_MEM, NULL);
 
+        // Have to declare this above the first goto cleanup
+        fountain_s* ftn = NULL;
+
         decodestate_s* tmp_ptr;
         tmp_ptr = realloc(state, sizeof(memdecodestate_s));
         if (tmp_ptr) state = tmp_ptr;
@@ -589,7 +592,6 @@ int proc_file(file_info_s* file_info) {
 
         ((memdecodestate_s*)state)->result = file_mapping + (section_num * bytes_per_section);
 
-        fountain_s* ftn = NULL;
         do {
             ftn = get_ftn_from_network(section_num);
             if (!ftn) goto cleanup;
