@@ -49,8 +49,8 @@ typedef struct wait_signal_s {
                      + __GNUC_PATCHLEVEL__)
 #endif
 
-// Test for GCC 4.8.*
-#if GCC_VERSION >= 40800
+// Test for GCC 4.9.*
+#if GCC_VERSION >= 40900
 
 #define fp_from(x)  x = _Generic((x)\
         , int16_t: ntohs(x)\
