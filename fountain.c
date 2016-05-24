@@ -341,26 +341,35 @@ typedef long long v8si __attribute__((vector_size (32)));
 
 static inline bool issubset_bit128(v4si sub, v4si super) {
     v4si result = (sub & super) ^ sub;
-    return (result[0] | result[1]) == 0;
+    //return (result[0] | result[1]) == 0;
+    return _mm_testz_si128(result, result);
 }
 static inline bool issubset_bit256(v8si sub, v8si super) {
+#ifdef __AVX2__
+    v8si result = _mm256_andnot_si256(super, sub);
+#else
     v8si result = (sub & super) ^ sub;
-    return (result[0] | result[1] | result[2] | result[3]) == 0;
+#endif
+    //return (result[0] | result[1] | result[2] | result[3]) == 0;
+    return _mm256_testz_si256(result, result);
 }
 #endif
 
 #if defined(__x86_64__) && defined(__AVX__)
 static inline bool issubset_bit512(const bset sub, const bset super)
 {
-#ifdef __BMI__
-#   define  andn(x, y)  __andn_u64(x, y)
-#else
-#   define  andn(x, y)  (~(x) & (y))
-#endif
-    return (andn(super[0],sub[0]) | andn(super[1],sub[1])
-          | andn(super[2],sub[2]) | andn(super[3],sub[3])
-          | andn(super[4],sub[4]) | andn(super[5],sub[5])
-          | andn(super[6],sub[6]) | andn(super[7],sub[7])) == 0;
+    return
+       issubset_bit256(*((v8si*)(sub    )), *((v8si*)(super)))
+    && issubset_bit256(*((v8si*)(sub + 4)), *((v8si*)(super + 4)));
+}
+
+static inline bool issubset_bit1024(const bset sub, const bset super)
+{
+    return
+       issubset_bit256(*((v8si*)(sub    )), *((v8si*)(super)))
+    && issubset_bit256(*((v8si*)(sub + 4)), *((v8si*)(super + 4)))
+    && issubset_bit256(*((v8si*)(sub + 8)), *((v8si*)(super + 8)))
+    && issubset_bit256(*((v8si*)(sub +12)), *((v8si*)(super +12)));
 }
 #endif // __x86_64__ && __AVX__
 
@@ -375,10 +384,10 @@ static bool fountain_issubset_bit(const fountain_s* sub, const fountain_s* super
             return issubset_bit128(*((v4si*)sub->block_set), *((v4si*)super->block_set));
         case 4: // We seem to be getting segfaults on this one
             return issubset_bit256(*((v8si*)sub->block_set), *((v8si*)super->block_set));
-#   if defined(__BMI__)
         case 8:
             return issubset_bit512(sub->block_set, super->block_set);
-#   endif
+        case 16:
+            return issubset_bit1024(sub->block_set, super->block_set);
 #endif
         case 1:
             return (~*super->block_set & *sub->block_set) == 0;
