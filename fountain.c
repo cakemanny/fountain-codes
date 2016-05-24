@@ -9,21 +9,16 @@
 #include <stdbool.h>
 #include <math.h>
 #include <assert.h>
-#include <x86intrin.h>
+#ifdef __x86_64__
+#   include <x86intrin.h>
+#endif
+#include "preheader.h" // define __has_builtin for non-clang
 #include "errors.h"
 #include "platform.h"
 #include "fountain.h"
 #include "dbg.h"
 #include "randgen.h"
 #include "bitset.h"
-
-#if !defined(__clang__) && !defined(__has_builtin)
-#   if defined(__GNUC__)
-#       define __has_builtin(x) 1
-#   else
-#       define __has_builtin(x) 0
-#   endif
-#endif
 
 #define ISBITSET(x, i) (( (x)[(i)>>3] & (1<<((i)&7)) ) != 0)
 #define SETBIT(x, i) (x)[(i)>>3] |= (1<<((i)&7))
@@ -354,26 +349,20 @@ static inline bool issubset_bit256(v8si sub, v8si super) {
 }
 #endif
 
-#ifndef GCC_VERSION
-#define GCC_VERSION (__GNUC__ * 10000 \
-                     + __GNUC_MINOR__ * 100 \
-                     + __GNUC_PATCHLEVEL__)
-#endif
-
-#if GCC_VERSION >= 40900 && defined(__AVX__)
+#if defined(__x86_64__) && defined(__AVX__)
 static inline bool issubset_bit512(const bset sub, const bset super)
 {
-    return (__andn_u64(super[0],sub[0])
-        | __andn_u64(super[1],sub[1])
-        | __andn_u64(super[2],sub[2])
-        | __andn_u64(super[3],sub[3])
-        | __andn_u64(super[4],sub[4])
-        | __andn_u64(super[5],sub[5])
-        | __andn_u64(super[6],sub[6])
-        | __andn_u64(super[7],sub[7])
-        | __andn_u64(super[8],sub[8])) == 0;
-}
+#ifdef __BMI__
+#   define  andn(x, y)  __andn_u64(x, y)
+#else
+#   define  andn(x, y)  (~(x) & (y))
 #endif
+    return (andn(super[0],sub[0]) | andn(super[1],sub[1])
+          | andn(super[2],sub[2]) | andn(super[3],sub[3])
+          | andn(super[4],sub[4]) | andn(super[5],sub[5])
+          | andn(super[6],sub[6]) | andn(super[7],sub[7])) == 0;
+}
+#endif // __x86_64__ && __AVX__
 
 static bool fountain_issubset_bit(const fountain_s* sub, const fountain_s* super) {
     assert( sub->section == super->section );
@@ -386,7 +375,7 @@ static bool fountain_issubset_bit(const fountain_s* sub, const fountain_s* super
             return issubset_bit128(*((v4si*)sub->block_set), *((v4si*)super->block_set));
         case 4: // We seem to be getting segfaults on this one
             return issubset_bit256(*((v8si*)sub->block_set), *((v8si*)super->block_set));
-#   if GCC_VERSION >= 40900
+#   if defined(__BMI__)
         case 8:
             return issubset_bit512(sub->block_set, super->block_set);
 #   endif
@@ -853,7 +842,9 @@ fountain_s* packethold_remove(packethold_s* hold, int pos, fountain_s* output) {
 
 void packethold_collect_garbage(packethold_s* hold)
 {
+#ifndef NDEBUG
     static int gc_count = 0;
+#endif
     int popcount = packethold_popcount(hold);
     if (hold->offset <= 2 * popcount)
         return; // GC not needed

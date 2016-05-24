@@ -6,6 +6,7 @@
   This is where we define the message syntax for protocol.
 */
 #include <stdint.h>
+#include "preheader.h"  // get GCC_VERSION
 
 typedef struct packet_s {
     int32_t magic;
@@ -43,33 +44,30 @@ typedef struct wait_signal_s {
     uint16_t section;
 } wait_signal_s;
 
-#ifndef GCC_VERSION
-#define GCC_VERSION (__GNUC__ * 10000 \
-                     + __GNUC_MINOR__ * 100 \
-                     + __GNUC_PATCHLEVEL__)
-#endif
-
 // Test for GCC 4.9.*
-#if GCC_VERSION >= 40900
-
-#define fp_from(x)  x = _Generic((x)\
-        , int16_t: ntohs(x)\
-        , uint16_t: ntohs(x)\
-        , int32_t: ntohl(x)\
-        , uint32_t: ntohl(x)\
-        )
-#define fp_to(x)  x = _Generic((x)\
-        , int16_t: htons(x)\
-        , uint16_t: htons(x)\
-        , int32_t: htonl(x)\
-        , uint32_t: htonl(x)\
-        )
-#else
+#if defined(__GNUC__) && GCC_VERSION >= 40900 \
+    || (!defined(__GNUC__) && __STDC_VERSION__ >= 201112L)
+#  define fp_from(x)  x = _Generic((x)\
+          , int16_t: ntohs(x)\
+          , uint16_t: ntohs(x)\
+          , int32_t: ntohl(x)\
+          , uint32_t: ntohl(x)\
+          )
+#  define fp_to(x)  x = _Generic((x)\
+          , int16_t: htons(x)\
+          , uint16_t: htons(x)\
+          , int32_t: htonl(x)\
+          , uint32_t: htonl(x)\
+          )
+#elif defined(__GNUC__) // version < 4.9
 //#define typeof(x)       __typeof__(x)
-#define TEQ(t1, t2)     __builtin_types_compatible_p(t1, t2)
-#define cexpr(C,E1,E2)  __builtin_choose_expr(C,E1,E2)
-#define fp_from(x)   x = cexpr(sizeof(x)==2, ntohs(x), cexpr(sizeof(x)==4, ntohl(x), (void)0))
-#define fp_to(x)     x = cexpr(sizeof(x)==2, htons(x), cexpr(sizeof(x)==4, htonl(x), (void)0))
+#  define TEQ(t1, t2)     __builtin_types_compatible_p(t1, t2)
+#  define cexpr(C,E1,E2)  __builtin_choose_expr(C,E1,E2)
+#  define fp_from(x)   x = cexpr(sizeof(x)==2, ntohs(x), cexpr(sizeof(x)==4, ntohl(x), (void)0))
+#  define fp_to(x)     x = cexpr(sizeof(x)==2, htons(x), cexpr(sizeof(x)==4, htonl(x), (void)0))
+#else
+// Need two levels of macros
+#  error "Need c11 or gcc for generics - or please implement some two level macro"
 #endif // GCC_VERSION
 
 #endif /* __FOUNTAINPROTOCOL_H__ */

@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <inttypes.h>
+#include "preheader.h" // define __has_builtin for non-clang
 
 #define IsBitSet32(x, i) (( (x)[(i)>>5] & (1<<((i)&31)) ) != 0)
 #define SetBit32(x, i) (x)[(i)>>5] |= (1<<((i)&31))
@@ -16,18 +18,10 @@
 typedef uint64_t* bset64;
 typedef uint32_t* bset32;
 
-#if !defined(__clang__) && !defined(__has_builtin)
-#   if defined(__GNUC__)
-#       define __has_builtin(x) 1
-#   else
-#       define __has_builtin(x) 0
-#   endif
-#endif
-
 #if defined(__x86_64__)
 #   define BSET_BITS        64
 #   define BSET_BITS_W      6
-#   define PRIbset          "llx"
+#   define PRIbset          PRIx64
 #   define bset             bset64
 #   define bset_int         uint64_t
 #   if __has_builtin(__builtin_ctzll) || defined(__GNUC__)
@@ -40,7 +34,7 @@ typedef uint32_t* bset32;
 #else
 #   define BSET_BITS        32
 #   define BSET_BITS_W      5
-#   define PRIbset          "x"
+#   define PRIbset          PRIx32
 #   define bset             bset32
 #   define bset_int         uint32_t
 #   if __has_builtin(__builtin_ctz) || defined(__GNUC__)
