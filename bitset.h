@@ -16,6 +16,14 @@
 typedef uint64_t* bset64;
 typedef uint32_t* bset32;
 
+#if !defined(__clang__) && !defined(__has_builtin)
+#   if defined(__GNUC__)
+#       define __has_builtin(x) 1
+#   else
+#       define __has_builtin(x) 0
+#   endif
+#endif
+
 #if defined(__x86_64__)
 #   define BSET_BITS        64
 #   define BSET_BITS_W      6
