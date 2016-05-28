@@ -29,9 +29,15 @@
 #define BURST_SIZE 1000
 
 // ------ types ------
-typedef struct server_s {
-    struct sockaddr_in address;
-} server_s;
+
+/*
+ * Want to have multiple regions in our cache which contain fountains for diff
+ * -erent sections of the file -- adding this typedef in advance
+ */
+typedef struct cache_region_s {
+    int section;
+    fountain_s** start;
+} cache_region_s;
 
 typedef struct ftn_cache_s {
     int capacity;
@@ -67,8 +73,6 @@ static SOCKET s = INVALID_SOCKET;
 static int port = DEFAULT_PORT;
 static char* remote_addr = DEFAULT_IP;
 static char const * program_name = NULL;
-
-static server_s curr_server = {};
 
 static char * outfilename = NULL;
 
@@ -133,12 +137,18 @@ int main(int argc, char** argv) {
         debug("Current recv buffer size is %d bytes", recvbuf_size);
     }
 
-    server_s server = { .address={
+    struct sockaddr_in server_address = {
         .sin_family = AF_INET,
         .sin_port   = htons(port),
         .sin_addr.s_addr = inet_addr(remote_addr)
-    } };
-    curr_server = server;
+    };
+
+    // Let's "connect" our UDP socket to the remote address to
+    // simplify the code below
+    if (connect(s, (struct sockaddr*)&server_address, sizeof server_address) < 0) {
+        log_err("Failed to connect UDP socket - wtf!");
+        goto shutdown;
+    }
 
     // define this above any jumps
     int i_should_free_outfilename = 0;
@@ -336,39 +346,18 @@ static int send_wait_signal(int capacity, int section) {
     };
     debug("Sending wait signal with capacity = %d", capacity);
     wait_signal_order_for_network(&msg);
-    int result = sendto(s, (char*)&msg, sizeof(msg), 0,
-            (struct sockaddr*)&curr_server.address,
-            sizeof curr_server.address);
+    int result = send(s, (void*)&msg, sizeof msg, 0);
     return (result < 0) ? result : 0;
 }
 
 static int recv_msg(char* buf, size_t buf_len) {
-    int bytes_recvd = 0;
-    struct sockaddr_in remote_addr;
-    socklen_t remote_addr_size = sizeof remote_addr;
-
-    do {
-        debug("Clearing buffer and waiting for reponse from %s",
-                inet_ntoa(curr_server.address.sin_addr));
-        memset(buf, '\0', buf_len);
-        bytes_recvd = recvfrom(s, buf, buf_len, 0,
-                        (struct sockaddr*)&remote_addr,
-                        &remote_addr_size);
-        if (bytes_recvd < 0) {
-            log_err("Error reading from network");
-            return ERR_NETWORK;
-        }
-
-        debug("Received %d bytes from %s",
-                bytes_recvd, inet_ntoa(remote_addr.sin_addr));
-
-        /* Make sure that this is from the server we made the request to,
-           otherwise ignore and try again */
-        /* We could eliminate this loop by connecting (even though it's a
-           UDP socket */
-    } while (memcmp((void*)&remote_addr.sin_addr,
-                (void*)&curr_server.address.sin_addr,
-                sizeof remote_addr.sin_addr) != 0);
+    memset(buf, '\0', buf_len);
+    int bytes_recvd = recv(s, buf, buf_len, 0);
+    if (bytes_recvd < 0) {
+        log_err("Error reading from network");
+        return ERR_NETWORK;
+    }
+    debug("Received %d bytes", bytes_recvd);
 
     return bytes_recvd;
 }
@@ -378,9 +367,7 @@ static int send_file_info_request() {
         .magic = MAGIC_REQUEST_INFO,
     };
     packet_order_for_network((packet_s*)&msg);
-    int result = sendto(s, (char*)&msg, sizeof(msg), 0,
-            (struct sockaddr*)&curr_server.address,
-            sizeof curr_server.address);
+    int result = send(s, (void*)&msg, sizeof msg, 0);
     return (result < 0) ? result : 0;
 }
 
@@ -511,10 +498,10 @@ static void load_from_network(ftn_cache_s* cache, int section) {
         }
         cache->base[i++] = ftn;
         cache->size++;
-        debug("Cache size is now %d", cache->size);
     }
     cache->current = cache->base;
     cache->section = section;
+    debug("Cache size is now %d", cache->size);
 }
 
 fountain_s* get_ftn_from_network(int section) {
@@ -525,6 +512,7 @@ fountain_s* get_ftn_from_network(int section) {
     }
 
     if (cache.section != section) {
+        debug("Throwing away %d packets", cache.size);
         while (cache.size > 0) {
             fountain_s* to_delete = *cache.current;
             *cache.current++ = NULL;
@@ -535,7 +523,7 @@ fountain_s* get_ftn_from_network(int section) {
     }
 
     if (cache.size == 0) {
-        debug("Cache size 0 - loading from network...");
+        debug("Cache size 0 - loading §%d from network...", section);
         load_from_network(&cache, section);
         if (cache.size == 0) return NULL;
     }
@@ -570,7 +558,6 @@ int proc_file(file_info_s* file_info) {
 
     uint64_t total_packets = 0;
 
-    // TODO: some sort of loop over the number of sections
     int num_sections = file_info_calc_num_sections(file_info);
     odebug("%d", num_sections);
     int bytes_per_section = file_info_bytes_per_section(file_info);
