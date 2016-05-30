@@ -28,6 +28,8 @@ ifdef RELEASE
       CFLAGS+=-Wa,-q # clang gives warning using this argument
       LDFLAGS+=-fwhole-program
     endif
+  else ifeq "$(OS)" "Windows_NT"
+    # Do nothing - link-time-opt seems to break the program on windwos
   else
     CC+=-flto -fuse-linker-plugin #lto-wrapper ignores our -Wa,-q
   endif # Platform

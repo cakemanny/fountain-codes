@@ -24,6 +24,8 @@
 #define SETBIT(x, i) (x)[(i)>>3] |= (1<<((i)&7))
 #define CLEARBIT(x, i) (x)[(i)>>3] &= (1<<((i)&7)) ^ 0xFF
 
+#define max(a,b) ({ typeof(a) _a = (a); typeof(b) _b = (b); _a > _b ? _a : _b; })
+#define min(a,b) ({ typeof(a) _a = (a); typeof(b) _b = (b); _a < _b ? _a : _b; })
 
 #define BUFFER_SIZE 256
 
@@ -83,7 +85,8 @@ static int choose_num_blocks(const int n) {
     double x = (double)rand() / (double)RAND_MAX;
     // Distribute to make smaller blocks more common
     double d = (double)n * (x <= 0.5 ? x*x*x : 1 - x*x*x);
-    return (int) ceil(d);
+    // Windows might pick rand()==RAND_MAX, so min these
+    return min(1 + (int)floor(d), n);
 }
 
 /*
@@ -149,6 +152,7 @@ fountain_s* fmake_fountain(FILE* f, int blk_size, int section, int section_size)
 
     int n = section_size; // Always
     output->num_blocks = choose_num_blocks(n);
+    assert( output->num_blocks > 0 );
     output->seed = rand();
     int block_list[output->num_blocks];
     seeded_select_blocks(block_list, n, output->num_blocks, output->seed);
@@ -846,8 +850,6 @@ fountain_s* packethold_remove(packethold_s* hold, int pos, fountain_s* output) {
     // the hold is happening
     return output;
 }
-
-#define max(a,b) ({ typeof(a) _a = (a); typeof(b) _b = (b); _a > _b ? _a : _b; })
 
 void packethold_collect_garbage(packethold_s* hold)
 {
