@@ -231,7 +231,7 @@ free_ftn:
 
 void free_fountain(fountain_s* ftn) {
     if (ftn->string) free(ftn->string);
-    if (ftn->block_set) free(ftn->block_set);
+    if (ftn->block_set) bset_free(ftn->block_set);
     free(ftn);
 }
 
@@ -596,12 +596,12 @@ int write_hold_ftn_to_output(
                                             write to file */
         if (bwrite(tmp_ftn->string, tmp_bn, state) != 1) {
             free(tmp_ftn->string);
-            free(tmp_ftn->block_set);
+            bset_free(tmp_ftn->block_set);
             return ERR_BWRITE;
         }
         blkdec[tmp_bn] = 1;
         free(tmp_ftn->string);
-        free(tmp_ftn->block_set);
+        bset_free(tmp_ftn->block_set);
     }
     return 1;
 }
@@ -809,7 +809,7 @@ void packethold_free(packethold_s* hold) {
     for (int i = 0; i < hold->num_packets; i++) {
         if (!ISBITSET(hold->deleted, i)) {
             if (hold->fountain[i].string) free(hold->fountain[i].string);
-            if (hold->fountain[i].block_set) free(hold->fountain[i].block_set);
+            if (hold->fountain[i].block_set) bset_free(hold->fountain[i].block_set);
         }
     }
     if (hold->mark) free(hold->mark);

@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#ifdef _WIN32
+#   include <malloc.h>
+#endif
 #include "preheader.h" // define __has_builtin for non-clang
 
 #define IsBitSet32(x, i) (( (x)[(i)>>5] & (1<<((i)&31)) ) != 0)
@@ -53,17 +56,35 @@ static size_t bset_len(int num_bits) {
 static bset bset_alloc(int num_bits) __malloc;
 bset bset_alloc(int num_bits)
 {
-    int len = bset_len(num_bits);
+    int len = bset_len(num_bits); // number of ints / int64s
+    /*
+     * If we are to use 256-bit SSE functions and registers then we need our
+     * memory to be 32-byte aligned
+     */
     if (__builtin_popcount(len) == 1) { // power of 2
-        int alignment = (len <= 2) ? len : 4;
+        int width_in_bytes = len * sizeof(bset_int);
+        int alignment = width_in_bytes > 32 ? 32 : width_in_bytes;
+
+#ifdef _WIN32
+        bset mem = _aligned_malloc(len * sizeof(bset_int), alignment);
+#else
         bset mem = NULL;
-        posix_memalign((void**)&mem, alignment * sizeof(bset_int), len * sizeof(bset_int));
+        posix_memalign((void**)&mem, alignment, len * sizeof(bset_int));
+#endif
         if (mem)
             memset(mem, 0, len * sizeof(bset_int));
         return mem;
     } else {
         return calloc(len, sizeof(bset_int));
     }
+}
+static void bset_free(bset bitset)
+{
+#ifdef _WIN32
+    _aligned_free(bitset);
+#else
+    free(bitset);
+#endif
 }
 
 static int issubset_bit(const bset sub, const bset super, size_t len)
