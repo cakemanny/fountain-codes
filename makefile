@@ -23,7 +23,7 @@ ifdef RELEASE
   ifeq "$(PLATFORM)" "Darwin"
     #want to include -flto if using clang rather than gcc TODO lookup make &&
     ifeq "clang" "$(findstring clang,$(CC))"
-      CC+= -flto -Wno-microsoft # TODO look at removing use of the anon union
+      CC+= -Wno-microsoft # TODO look at removing use of the anon union
     else
       CFLAGS+=-Wa,-q # clang gives warning using this argument
       LDFLAGS+=-fwhole-program
@@ -31,7 +31,8 @@ ifdef RELEASE
   else ifeq "$(OS)" "Windows_NT"
     # Do nothing - link-time-opt seems to break the program on windwos
   else
-    CC+=-flto -fuse-linker-plugin #lto-wrapper ignores our -Wa,-q
+	# using lto seems to make us slower on linux
+    #CC+=-flto -fuse-linker-plugin #lto-wrapper ignores our -Wa,-q
   endif # Platform
 
 else # Not RELEASE

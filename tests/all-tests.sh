@@ -46,7 +46,7 @@ perform_test() {
 }
 
 for bs in 128 256 512 1024; do
-    for ss in 128 256 512 1024; do
+    for ss in 128 256 512; do
         perform_test $bs $ss
     done
 done
