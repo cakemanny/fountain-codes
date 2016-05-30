@@ -12,10 +12,11 @@
 #define ERR_NETWORK     (-8)
 #define ERR_INVALID     (-9)
 #define ERR_MAP        (-10)
+#define ERR_SEND       (-11)
 
 //#define VA_NUM_ARGS(...) VA_NUM_ARGS_IMPL(__VA_ARGS__, 5, 4, 3, 2, 1)
 //#define VA_NUM_ARGS_IMPL(_1,_2,_3,_4,_5,N,...) N
 
-int handle_error(int error_number, void* args);
+int handle_error(int error_number, const void* args);
 
 #endif // __ERRORS_H__

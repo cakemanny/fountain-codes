@@ -40,8 +40,8 @@ typedef struct file_info_s {
 
 typedef struct wait_signal_s {
     int32_t magic;
-    int16_t capacity; // This could probably be an int16_t ...
-    uint16_t section;
+    uint16_t num_sections;
+    struct { uint16_t section; uint16_t capacity; } sections[0];
 } wait_signal_s;
 
 // Test for GCC 4.9.*

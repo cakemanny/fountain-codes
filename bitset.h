@@ -53,7 +53,17 @@ static size_t bset_len(int num_bits) {
 static bset bset_alloc(int num_bits) __malloc;
 bset bset_alloc(int num_bits)
 {
-    return calloc(bset_len(num_bits), sizeof(bset_int));
+    int len = bset_len(num_bits);
+    if (__builtin_popcount(len) == 1) { // power of 2
+        int alignment = (len <= 2) ? len : 4;
+        bset mem = NULL;
+        posix_memalign((void**)&mem, alignment * sizeof(bset_int), len * sizeof(bset_int));
+        if (mem)
+            memset(mem, 0, len * sizeof(bset_int));
+        return mem;
+    } else {
+        return calloc(len, sizeof(bset_int));
+    }
 }
 
 static int issubset_bit(const bset sub, const bset super, size_t len)

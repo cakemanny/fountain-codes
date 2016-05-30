@@ -27,17 +27,9 @@
 #define DEFAULT_PORT 2534
 #define DEFAULT_IP "127.0.0.1"
 #define BURST_SIZE 1000
+#define NUM_CACHES 4
 
 // ------ types ------
-
-/*
- * Want to have multiple regions in our cache which contain fountains for diff
- * -erent sections of the file -- adding this typedef in advance
- */
-typedef struct cache_region_s {
-    int section;
-    fountain_s** start;
-} cache_region_s;
 
 typedef struct ftn_cache_s {
     int capacity;
@@ -46,14 +38,20 @@ typedef struct ftn_cache_s {
     int section;
     fountain_s** base;
     fountain_s** current;
+    struct ftn_cache_s* next;
 } ftn_cache_s;
 
+typedef struct stats_s {
+    int num_requested;
+    int num_recvd;
+    int num_discarded;
+} stats_s;
 
 // ------ Forward declarations ------
 static int proc_file(file_info_s* file_info);
 static int create_connection();
 static void close_connection();
-static fountain_s* get_ftn_from_network(int section);
+static fountain_s* get_ftn_from_network(int section, int num_sections);
 static int get_remote_file_info(struct file_info_s*);
 static void platform_truncate(const char* filename, int length);
 static char* sanitize_path(const char* unsafepath) __malloc;
@@ -61,10 +59,11 @@ static int file_info_bytes_per_section(file_info_s* info);
 static int file_info_calc_num_sections(file_info_s* info);
 
 struct option long_options[] = {
-    { "help",   no_argument,        NULL, 'h' },
-    { "ip",     required_argument,  NULL, 'i' },
-    { "output", required_argument,  NULL, 'o' },
-    { "port",   required_argument,  NULL, 'p' },
+    { "cachemul",   required_argument,  NULL, 'c' },
+    { "help",       no_argument,        NULL, 'h' },
+    { "ip",         required_argument,  NULL, 'i' },
+    { "output",     required_argument,  NULL, 'o' },
+    { "port",       required_argument,  NULL, 'p' },
     { 0, 0, 0, 0 }
 };
 
@@ -81,6 +80,9 @@ static char* netbuf = NULL;
 static int netbuf_len;
 
 static int section_size_in_blocks = -1;
+static int cache_size_multiplier = 6;
+
+static stats_s stats = { };
 
 // ------ functions ------
 static void print_usage_and_exit(int status) {
@@ -90,6 +92,7 @@ static void print_usage_and_exit(int status) {
     fputs("\
 \n\
   -h, --help                display this help message\n\
+  -c, --cachemul=N          cache size as multiple of section size\n\
   -i, --ip=IPADDRESS        ip address of the remote host\n\
   -o, --output=FILENAME     output file name\n\
   -p, --port=PORT           port to connect to\n\
@@ -101,8 +104,11 @@ int main(int argc, char** argv) {
     /* deal with options */
     program_name = argv[0];
     int c;
-    while ( (c = getopt_long(argc, argv, "hi:o:p:", long_options, NULL)) != -1 ) {
+    while ( (c = getopt_long(argc, argv, "c:hi:o:p:", long_options, NULL)) != -1 ) {
         switch (c) {
+            case 'c':
+                cache_size_multiplier = atoi(optarg);
+                break;
             case 'h':
                 print_usage_and_exit(0);
                 break;
@@ -143,15 +149,15 @@ int main(int argc, char** argv) {
         .sin_addr.s_addr = inet_addr(remote_addr)
     };
 
+    // define this above any jumps
+    int i_should_free_outfilename = 0;
+
     // Let's "connect" our UDP socket to the remote address to
     // simplify the code below
     if (connect(s, (struct sockaddr*)&server_address, sizeof server_address) < 0) {
         log_err("Failed to connect UDP socket - wtf!");
         goto shutdown;
     }
-
-    // define this above any jumps
-    int i_should_free_outfilename = 0;
 
     struct file_info_s file_info;
     if (get_remote_file_info(&file_info) < 0) {
@@ -197,6 +203,10 @@ int main(int argc, char** argv) {
         goto shutdown;
 
     platform_truncate(outfilename, file_info.filesize);
+
+    odebug("%d", stats.num_requested);
+    odebug("%d", stats.num_recvd);
+    odebug("%d", stats.num_discarded);
 
 shutdown:
     if (i_should_free_outfilename)
@@ -332,22 +342,39 @@ static void file_info_order_from_network(file_info_s* info) {
 }
 
 static void wait_signal_order_for_network(wait_signal_s* wait_signal) {
+    int n = wait_signal->num_sections;
     fp_to(wait_signal->magic);
-    fp_to(wait_signal->capacity);
-    fp_to(wait_signal->section);
+    fp_to(wait_signal->num_sections);
+    for (int i = 0; i < n; i++) {
+        fp_to(wait_signal->sections[i].section);
+        fp_to(wait_signal->sections[i].capacity);
+    }
 }
 
 
-static int send_wait_signal(int capacity, int section) {
-    wait_signal_s msg = {
-        .magic = MAGIC_WAITING,
-        .capacity = (int16_t)capacity,
-        .section = (uint16_t)section
-    };
-    debug("Sending wait signal with capacity = %d", capacity);
-    wait_signal_order_for_network(&msg);
-    int result = send(s, (void*)&msg, sizeof msg, 0);
+static int send_wait_signal(int num_sections, int* sections, int* capacities) {
+    for (int i = 0; i < num_sections; i++)
+        stats.num_requested += capacities[i];
+    int packet_size = sizeof(wait_signal_s) + num_sections * 2 * sizeof(uint16_t);
+    wait_signal_s* msg = calloc(1, packet_size);
+    check_mem(msg);
+
+    msg->magic = MAGIC_WAITING;
+    msg->num_sections = (uint16_t)num_sections;
+    for (int i = 0; i < num_sections; i++) {
+        msg->sections[i].section = sections[i];
+        msg->sections[i].capacity = capacities[i];
+    }
+
+    for (int i = 0; i < num_sections; i++) {
+        debug("Sending wait signal with capacity = %d", capacities[i]);
+    }
+    wait_signal_order_for_network(msg);
+    int result = send(s, (void*)msg, packet_size, 0);
+    free(msg);
     return (result < 0) ? result : 0;
+error:
+    return ERR_MEM;
 }
 
 static int recv_msg(char* buf, size_t buf_len) {
@@ -393,16 +420,26 @@ int get_remote_file_info(file_info_s* file_info) {
     return -1;
 }
 
-static void ftn_cache_alloc(ftn_cache_s* cache) {
-    if (section_size_in_blocks > 0)
-        cache->capacity = 8 * section_size_in_blocks;
-    else
-        cache->capacity = BURST_SIZE;
-    cache->base = malloc(cache->capacity * sizeof *cache->base);
-    if (cache->base == NULL) return;
+static ftn_cache_s* ftn_cache_alloc() __malloc;
+ftn_cache_s* ftn_cache_alloc() {
+    assert(section_size_in_blocks > 0);
 
+    ftn_cache_s* cache = malloc(sizeof *cache);
+    check_mem(cache);
+    memset(cache, 0, sizeof *cache);
+
+    cache->capacity = cache_size_multiplier * section_size_in_blocks;
+    cache->section = -1;
+
+    cache->base = malloc(cache->capacity * sizeof *cache->base);
+    check_mem(cache->base);
     cache->current = cache->base;
-    cache->section = 0;
+
+    return cache;
+error:
+    if (cache)
+        free(cache);
+    return NULL;
 }
 
 static void handle_pollevents(struct pollfd* pfd) {
@@ -415,7 +452,22 @@ static void handle_pollevents(struct pollfd* pfd) {
         log_err("POLLNVAL: Invalid socket");
 }
 
-static void load_from_network(ftn_cache_s* cache, int section) {
+
+typedef struct { int sections[NUM_CACHES]; int caps[NUM_CACHES]; } capacities_s;
+
+static capacities_s get_capacities(ftn_cache_s* cache, int num_sections) {
+    capacities_s result = { };
+    ftn_cache_s** p = &cache;
+    for (int i = 0; i < num_sections; i++) {
+        result.sections[i] = (*p)->section;
+        result.caps[i] = (*p)->capacity - (*p)->size;
+        p = &(*p)->next;
+    }
+    return result;
+}
+
+static void load_from_network(ftn_cache_s* cache, int num_sections) {
+    assert( num_sections <= NUM_CACHES ); // We can maybe increase this at some point
 
     struct pollfd pfd = {
         .fd = s,
@@ -432,19 +484,22 @@ static void load_from_network(ftn_cache_s* cache, int section) {
         handle_pollevents(&pfd);
         return;
     }
-    if (pollret1 == 0)
-        send_wait_signal(cache->capacity - cache->size, section);
+    if (pollret1 == 0) {
+        capacities_s c = get_capacities(cache, num_sections);
+        // FIXME: check return code
+        send_wait_signal(num_sections, c.sections, c.caps);
+    }
 
     static const int max_timeout = 15000;
     int timeout = 10;
 
-    // we need to do these either 750 times or... have a timeout
-    // we might also want to adjust our yield expectation depending
-    // on whether we are hitting those timeouts or not...
-    //
-    // TODO Next important task, work out how to switch between filling the
-    // cache when there are packets and decoding when there aren't
-    for (int i = 0; i < cache->capacity; ) {
+    int total_capacities = ({
+        int sum = 0;
+        capacities_s c = get_capacities(cache, num_sections);
+        for (int i = 0; i < num_sections; i++) { sum += c.caps[i]; }
+        sum;
+    });
+    for (int i = 0; i < total_capacities; i++) {
         int pollret = poll(&pfd, 1, timeout);
         if (pollret == 0) {
             if (cache->size > 0) {
@@ -456,7 +511,9 @@ static void load_from_network(ftn_cache_s* cache, int section) {
                             (double)max_timeout / 1000.0);
                     return;
                 }
-                send_wait_signal(cache->capacity, section);
+                capacities_s c = get_capacities(cache, num_sections);
+                // FIXME: check return code
+                send_wait_signal(num_sections, c.sections, c.caps);
                 timeout <<= 1;
                 continue;
             }
@@ -476,6 +533,7 @@ static void load_from_network(ftn_cache_s* cache, int section) {
             handle_error(bytes_recvd, NULL);
             return;
         }
+        stats.num_recvd += 1;
 
         buffer_s packet = {
             .length = bytes_recvd,
@@ -490,47 +548,82 @@ static void load_from_network(ftn_cache_s* cache, int section) {
             // error code instead
             continue;
         }
-        if (ftn->section != section) {
+        // find cache for this section
+        ftn_cache_s** p = &cache;
+        while (*p != NULL) {
+            if (ftn->section == (*p)->section) {
+                (*p)->base[(*p)->size++] = ftn;
+                break;
+            }
+            p = &(*p)->next;
+        }
+        if (*p == NULL) {
             // Must be an old packet from a previous request
             debug("discarding fountain from section %d", ftn->section);
             free_fountain(ftn);
             continue;
         }
-        cache->base[i++] = ftn;
-        cache->size++;
     }
-    cache->current = cache->base;
-    cache->section = section;
-    debug("Cache size is now %d", cache->size);
+    ftn_cache_s** p = &cache;
+    for (int i = 0; i < num_sections; i++) {
+        (*p)->current = (*p)->base;
+        debug("Cache size is now %d", (*p)->size);
+        p = &(*p)->next;
+    }
 }
 
-fountain_s* get_ftn_from_network(int section) {
-    static ftn_cache_s cache = {};
-    if (cache.base == NULL) {
-        ftn_cache_alloc(&cache);
-        if (cache.base == NULL) return NULL;
+fountain_s* get_ftn_from_network(int section, int num_sections) {
+    static ftn_cache_s* cache = NULL;
+    if (cache == NULL) {
+        // Allocate
+        ftn_cache_s** p = &cache;
+        for (int i = 0; i < NUM_CACHES; i++) {
+            *p = ftn_cache_alloc();
+            if (!*p)
+                return NULL; // FIXME: we can do better
+            p = &(*p)->next; // p points to the `next` pointer of what p pointed to
+        }
     }
 
-    if (cache.section != section) {
-        debug("Throwing away %d packets", cache.size);
-        while (cache.size > 0) {
-            fountain_s* to_delete = *cache.current;
-            *cache.current++ = NULL;
-            --cache.size;
+    if (cache->section != section) {
+        debug("Throwing away %d packets", cache->size);
+        stats.num_discarded += cache->size;
+        while (cache->size > 0) {
+            fountain_s* to_delete = *cache->current;
+            *cache->current++ = NULL;
+            --cache->size;
             free_fountain(to_delete);
         }
-        assert(cache.size == 0);
+        assert(cache->size == 0);
+        ftn_cache_s* c = cache;
+        cache = cache->next;
+        cache->section = section; // if cache-section == -1
+        c->section = -1;
+        ftn_cache_s** p = &cache;
+        while (*p != NULL) p = &(*p)->next; // p ends up pointing the null next pointer
+        *p = c;
+        c->next = NULL;
     }
 
-    if (cache.size == 0) {
+    if (cache->size == 0) {
         debug("Cache size 0 - loading §%d from network...", section);
-        load_from_network(&cache, section);
-        if (cache.size == 0) return NULL;
+        int n_to_req = (num_sections - section > NUM_CACHES)
+                        ? NUM_CACHES : num_sections - section;
+        assert( n_to_req > 0 && n_to_req <= NUM_CACHES );
+        odebug("%d", n_to_req);
+        ftn_cache_s** p = &cache;
+        for (int i = 0; i < n_to_req; i++) {
+            (*p)->section = section + i;
+            p = &(*p)->next;
+        };
+        load_from_network(cache, n_to_req);
+
+        if (cache->size == 0) return NULL;
     }
 
-    fountain_s* output = *cache.current;
-    *cache.current++ = NULL;
-    --cache.size;
+    fountain_s* output = *cache->current;
+    *cache->current++ = NULL;
+    --cache->size;
     return output;
 }
 
@@ -580,7 +673,7 @@ int proc_file(file_info_s* file_info) {
         ((memdecodestate_s*)state)->result = file_mapping + (section_num * bytes_per_section);
 
         do {
-            ftn = get_ftn_from_network(section_num);
+            ftn = get_ftn_from_network(section_num, num_sections);
             if (!ftn) goto cleanup;
             state->packets_so_far++;
             result = memdecode_fountain((memdecodestate_s*)state, ftn);

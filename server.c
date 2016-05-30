@@ -37,7 +37,7 @@ static int create_connection(const char* ip_address);
 static int receive_request(client_s * new_client, const char * filename);
 static void close_connection();
 static int send_fountain(client_s * client, fountain_s* ftn);
-static int send_block_burst(client_s * client, const char * filename, int capacity, int section);
+static int send_block_burst(client_s * client, const char * filename, wait_signal_s* signal);
 static int send_info(client_s * client, const char * filename);
 static int filesize_in_bytes(const char * filename);
 
@@ -209,8 +209,13 @@ void close_connection() {
 
 static void wait_signal_order_from_network(wait_signal_s* wait_signal) {
     fp_from(wait_signal->magic);
-    fp_from(wait_signal->capacity);
-    fp_from(wait_signal->section);
+    fp_from(wait_signal->num_sections);
+
+    int n = wait_signal->num_sections;
+    for (int i = 0; i < n; i++) {
+        fp_from(wait_signal->sections[i].section);
+        fp_from(wait_signal->sections[i].capacity);
+    }
 }
 //
 // Translate the message sent to us
@@ -252,8 +257,7 @@ int receive_request(client_s * new_client, const char * filename) {
             {
                 wait_signal_s* signal = (wait_signal_s*)buf;
                 wait_signal_order_from_network(signal);
-                error = send_block_burst(new_client, filename,
-                                         signal->capacity, signal->section);
+                error = send_block_burst(new_client, filename, signal);
             }
             break;
         default:
@@ -310,7 +314,7 @@ int send_info(client_s * client, const char * filename) {
             (struct sockaddr*)&client->address,
             sizeof client->address);
 
-    if (bytes_sent == SOCKET_ERROR) return SOCKET_ERROR;
+    if (bytes_sent == SOCKET_ERROR) return ERR_SEND;
     return 0;
 }
 
@@ -324,23 +328,28 @@ int send_fountain(client_s * client, fountain_s* ftn) {
 
     free(packet.buffer);
 
-    if (bytes_sent == SOCKET_ERROR) return SOCKET_ERROR;
+    if (bytes_sent == SOCKET_ERROR)
+        return ERR_SEND;
     return 0;
 }
 
-int send_block_burst(client_s * client, const char * filename, int capacity, int section) {
+int send_block_burst(client_s * client, const char * filename, wait_signal_s* signal) {
     FILE* f = fopen(filename, "rb");
     if (!f) return ERR_FOPEN;
-    for (int i = 0; i < capacity; i++) {
-        // make a fountain
-        // send it across the air
-        fountain_s* ftn = fmake_fountain(f, blk_size, section, section_size);
-        if (ftn == NULL) return ERR_MEM;
-        int error = send_fountain(client, ftn);
-        if (error < 0) handle_error(error, NULL);
-        free_fountain(ftn);
+    for (int i = 0; i < signal->num_sections; i++) {
+        int capacity = signal->sections[i].capacity;
+        int section = signal->sections[i].section;
+        for (int j = 0; j < capacity; j++) {
+            // make a fountain
+            // send it across the air
+            fountain_s* ftn = fmake_fountain(f, blk_size, section, section_size);
+            if (ftn == NULL) return ERR_MEM;
+            int error = send_fountain(client, ftn);
+            if (error < 0) handle_error(error, NULL);
+            free_fountain(ftn);
+        }
+        log_info("Sent packet burst of size %d for section %d", capacity, section);
     }
-    log_info("Sent packet burst of size %d for section %d", capacity, section);
 
     fclose(f);
     return 0;

@@ -13,7 +13,7 @@
 #define fargs(A) ((A) ? *((char const **)(A)) : "_output_file_")
 #define margs(A) ((A) ? *((char const **)(A)) : "")
 
-int handle_error(int error_number, void* args) {
+int handle_error(int error_number, const void* args) {
     switch (error_number) {
         case ERR_FOPEN:
             pe("Couldn't open file %s" ENDL, fargs(args));
@@ -45,6 +45,9 @@ int handle_error(int error_number, void* args) {
             break;
         case ERR_MAP:
             pe("Couldn't map file %s" ENDL, fargs(args));
+            break;
+        case ERR_SEND:
+            pe("An error occurred sending");
             break;
         default:
             return 0;
