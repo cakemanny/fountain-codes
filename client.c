@@ -457,11 +457,11 @@ typedef struct { int sections[NUM_CACHES]; int caps[NUM_CACHES]; } capacities_s;
 
 static capacities_s get_capacities(ftn_cache_s* cache, int num_sections) {
     capacities_s result = { };
-    ftn_cache_s** p = &cache;
+    ftn_cache_s* c = cache;
     for (int i = 0; i < num_sections; i++) {
-        result.sections[i] = (*p)->section;
-        result.caps[i] = (*p)->capacity - (*p)->size;
-        p = &(*p)->next;
+        result.sections[i] = c->section;
+        result.caps[i] = c->capacity - c->size;
+        c = c->next;
     }
     return result;
 }
@@ -549,26 +549,26 @@ static void load_from_network(ftn_cache_s* cache, int num_sections) {
             continue;
         }
         // find cache for this section
-        ftn_cache_s** p = &cache;
-        while (*p != NULL) {
-            if (ftn->section == (*p)->section) {
-                (*p)->base[(*p)->size++] = ftn;
+        ftn_cache_s* c = cache;
+        while (c != NULL) {
+            if (ftn->section == c->section) {
+                c->base[c->size++] = ftn;
                 break;
             }
-            p = &(*p)->next;
+            c = c->next;
         }
-        if (*p == NULL) {
+        if (c == NULL) {
             // Must be an old packet from a previous request
             debug("discarding fountain from section %d", ftn->section);
             free_fountain(ftn);
             continue;
         }
     }
-    ftn_cache_s** p = &cache;
+    ftn_cache_s* c = cache;
     for (int i = 0; i < num_sections; i++) {
-        (*p)->current = (*p)->base;
-        debug("Cache size is now %d", (*p)->size);
-        p = &(*p)->next;
+        c->current = c->base;
+        debug("Cache size is now %d", c->size);
+        c = c->next;
     }
 }
 
@@ -611,10 +611,10 @@ fountain_s* get_ftn_from_network(int section, int num_sections) {
                         ? NUM_CACHES : num_sections - section;
         assert( n_to_req > 0 && n_to_req <= NUM_CACHES );
         odebug("%d", n_to_req);
-        ftn_cache_s** p = &cache;
+        ftn_cache_s* c = cache;
         for (int i = 0; i < n_to_req; i++) {
-            (*p)->section = section + i;
-            p = &(*p)->next;
+            c->section = section + i;
+            c = c->next;
         };
         load_from_network(cache, n_to_req);
 
