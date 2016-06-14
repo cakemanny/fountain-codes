@@ -97,7 +97,7 @@ char* map_file(char const * filename) {
     stat(filename, &st);
     size_t filesize = st.st_size;
 
-    char* mapped = (char*)mmap(NULL, filesize, PROT_READ|PROT_WRITE, MAP_FILE|MAP_SHARED, fd, 0);
+    char* mapped = (char*)mmap(NULL, filesize, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
     if (mapped == MAP_FAILED) {
         close(fd);
         return NULL;

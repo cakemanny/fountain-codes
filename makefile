@@ -54,6 +54,9 @@ LDLIBS=-lm
 ifeq "$(OS)" "Windows_NT"
   LDLIBS+=-lws2_32
 endif
+ifeq "$(PLATFORM)" "SunOS"
+  LDLIBS+=-lsocket -lnsl
+endif
 
 # Define a function for adding .exe
 ifeq "$(OS)" "Windows_NT"
