@@ -549,13 +549,12 @@ static void load_from_network(ftn_cache_s* cache, int num_sections) {
             continue;
         }
         // find cache for this section
-        ftn_cache_s* c = cache;
-        while (c != NULL) {
+        ftn_cache_s* c;
+        for (c = cache; c != NULL; c = c->next) {
             if (ftn->section == c->section) {
                 c->base[c->size++] = ftn;
                 break;
             }
-            c = c->next;
         }
         if (c == NULL) {
             // Must be an old packet from a previous request
