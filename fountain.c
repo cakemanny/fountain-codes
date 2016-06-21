@@ -174,22 +174,24 @@ fountain_s* fmake_fountain(FILE* f, int blk_size, int section, int section_size)
         int m = block_list[i] * blk_size;
         if (fseek(f, offset + m, SEEK_SET) < 0)  { /* m bytes from beginning of section */
             log_err("Couldn't seek to pos %d in file", offset + m);
-            goto free_os;
+            goto free_buffer;
         }
         size_t bytes = fread(buffer, 1, blk_size, f);
         if (bytes < blk_size && ferror(f)) {
             log_err("Error reading file");
-            goto free_os;
+            goto free_buffer;
         }
         if (bytes)
             xorncpy(output->string, buffer, bytes);
     }
 
     // Cleanup
-    if (blk_size > sizeof(fmake_buf)) free(buffer);
+    if (buffer != fmake_buf) free(buffer);
 
     return output;
 
+free_buffer:
+    if (buffer != fmake_buf) free(buffer);
 free_os:
 free_ftn:
     free_fountain(output);
@@ -205,6 +207,7 @@ fountain_s* make_fountain(const char* string, int blk_size, size_t length, int s
     output->blk_size = blk_size;
 
     output->num_blocks = choose_num_blocks(n);
+    assert( output->num_blocks > 0 );
     output->seed = rand();
 
     int block_list[output->num_blocks];
@@ -657,9 +660,9 @@ char* decode_fountain(const char* string, int blk_size) {
     if (!state) return NULL;
 
     /* Since we are using memory, attach a pointer to a result buffer */
-    decodestate_s* tmp_ptr;
-    tmp_ptr = realloc(state, sizeof(memdecodestate_s));
-    if (tmp_ptr) state = tmp_ptr; else goto cleanup;
+    memdecodestate_s* tmp_ptr = realloc(state, sizeof(memdecodestate_s));
+    if (tmp_ptr) state = (decodestate_s*)tmp_ptr;
+    else goto cleanup;
 
     //char* output = calloc(strlen(string) + 1, 1);
     char* output = calloc(num_blocks, blk_size);

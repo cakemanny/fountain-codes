@@ -286,6 +286,7 @@ char* sanitize_path(const char* unsafepath)
         }
         *cur_seg++ = segment; /* otherwise include in path array */
     }
+    /* Now cur_seg points 1 past end of segments in seg0 */
 
     /* the output path won't be longer that the input */
     safepath = calloc(1 + strlen(unsafepath), sizeof *safepath);
@@ -297,7 +298,8 @@ char* sanitize_path(const char* unsafepath)
         sp = stpcpy(sp, *p);
         *sp++ = '/';
     }
-    sp = stpcpy(sp, *(cur_seg - 1));
+    if (cur_seg > seg0) // silence clang --analyze
+        stpcpy(sp, *(cur_seg - 1));
 
 error:
     if (path) free(path);
@@ -662,10 +664,13 @@ int proc_file(file_info_s* file_info) {
         // Have to declare this above the first goto cleanup
         fountain_s* ftn = NULL;
 
-        decodestate_s* tmp_ptr;
-        tmp_ptr = realloc(state, sizeof(memdecodestate_s));
-        if (tmp_ptr) state = tmp_ptr;
-        else { result = ERR_MEM; goto cleanup; }
+        memdecodestate_s* tmp_ptr = realloc(state, sizeof(memdecodestate_s));
+        if (tmp_ptr) {
+            state = (decodestate_s*)tmp_ptr;
+        } else {
+            result = ERR_MEM;
+            goto cleanup;
+        }
 
         state->filename = memdecodestate_filename;
 

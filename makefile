@@ -45,6 +45,11 @@ ifdef PROFILE
   LDFLAGS=-pg
 endif
 
+ifdef SANIT
+  CFLAGS+=-fsanitize=address
+  LDFLAGS+=-fsanitize=address
+endif
+
 # Use the doxygen checking feature if using clang
 ifeq "clang" "$(findstring clang,$(CC))"
   CFLAGS+=-Wdocumentation
