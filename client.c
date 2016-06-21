@@ -422,25 +422,36 @@ int get_remote_file_info(file_info_s* file_info) {
     return -1;
 }
 
-static ftn_cache_s* ftn_cache_alloc() __malloc;
-ftn_cache_s* ftn_cache_alloc() {
+static ftn_cache_s* ftn_cache_alloc(unsigned int num_caches) __malloc;
+ftn_cache_s* ftn_cache_alloc(unsigned int num_caches) {
     assert(section_size_in_blocks > 0);
 
-    ftn_cache_s* cache = malloc(sizeof *cache);
-    check_mem(cache);
-    memset(cache, 0, sizeof *cache);
+    int capacity_each = cache_size_multiplier * section_size_in_blocks;
 
-    cache->capacity = cache_size_multiplier * section_size_in_blocks;
-    cache->section = -1;
+    ftn_cache_s* caches = malloc(
+        num_caches * sizeof(*caches)
+        + num_caches * capacity_each * sizeof(*caches[0].base)
+    );
+    check_mem(caches);
+    // zero only the cache structs
+    memset(caches, 0, num_caches * sizeof *caches);
 
-    cache->base = malloc(cache->capacity * sizeof *cache->base);
-    check_mem(cache->base);
-    cache->current = cache->base;
+    // 
+    caches[0].base = (fountain_s**) &caches[num_caches];
+    for (int i = 1; i < num_caches; i++) {
+        caches[i].base = caches[0].base + i * capacity_each;
+    }
 
-    return cache;
+    for (int i = 0; i < num_caches; i++) {
+        caches[i].capacity = capacity_each;
+        caches[i].section = -1;
+        caches[i].current = caches[i].base;
+    }
+
+    return caches;
 error:
-    if (cache)
-        free(cache);
+    if (caches)
+        free(caches);
     return NULL;
 }
 
@@ -576,13 +587,12 @@ static void load_from_network(ftn_cache_s* cache, int num_sections) {
 fountain_s* get_ftn_from_network(int section, int num_sections) {
     static ftn_cache_s* cache = NULL;
     if (cache == NULL) {
-        // Allocate
-        ftn_cache_s** p = &cache;
-        for (int i = 0; i < NUM_CACHES; i++) {
-            *p = ftn_cache_alloc();
-            if (!*p)
-                return NULL; // FIXME: we can do better
-            p = &(*p)->next; // p points to the `next` pointer of what p pointed to
+        // in middle of switching to array of caches
+        cache = ftn_cache_alloc(NUM_CACHES);
+        if (cache == NULL)
+            return NULL;
+        for (int i = 0; i < NUM_CACHES - 1; i++) {
+            cache[i].next = cache + i + 1;
         }
     }
 
