@@ -565,8 +565,12 @@ static void load_from_network(ftn_cache_s* cache, int num_sections) {
         ftn_cache_s* c;
         for (c = cache; c != NULL; c = c->next) {
             if (ftn->section == c->section) {
-                c->base[c->size++] = ftn;
-                break;
+                if (c->size < c->capacity) {
+                    c->base[c->size++] = ftn;
+                    break;
+                } else {
+                    debug("Cache for section %d is full", ftn->section);
+                }
             }
         }
         if (c == NULL) {
@@ -688,11 +692,17 @@ int proc_file(file_info_s* file_info) {
 
         do {
             ftn = get_ftn_from_network(section_num, num_sections);
-            if (!ftn) goto cleanup;
+            if (!ftn)  {
+                __builtin_trap(); // Hopefully core dump when this goes funny
+                goto cleanup;
+            }
             state->packets_so_far++;
             result = memdecode_fountain((memdecodestate_s*)state, ftn);
             free_fountain(ftn);
-            if (result < 0) goto cleanup;
+            if (result < 0) {
+                __builtin_trap(); // Hopefully core dump when this goes funny
+                goto cleanup;
+            }
         } while (!decodestate_is_decoded(state));
 
         log_info("Packets required for section %d: %d", section_num, state->packets_so_far);
@@ -700,8 +710,10 @@ int proc_file(file_info_s* file_info) {
 cleanup:
         if (state)
             decodestate_free(state);
-        if (result < 0 || !ftn)
+        if (result < 0 || !ftn) {
+            __builtin_trap(); // Hopefully core dump when this goes funny
             break;
+        }
     }
     log_info("Total packets required for download: %"PRIu64, total_packets);
 

@@ -538,8 +538,8 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
             if (!retest) {
                 odebug("%d", ftn->num_blocks);
                 int result = reduce_against_hold(hold, ftn);
-                if (result < 0) return result;
-                if (result) {
+                assert(result >= 0);
+                if (result > 0) {
                     retest = true;
                     odebug("%d after", ftn->num_blocks);
                     debug("Result = %d, doing retest", result);
@@ -599,13 +599,14 @@ int write_hold_ftn_to_output(
     if (!IsBitSet(blkdec, tmp_bn)) { /* not yet decoded so
                                             write to file */
         if (bwrite(tmp_ftn->string, tmp_bn, state) != 1) {
+            __builtin_trap(); // catch those funny errors
             free(tmp_ftn->string);
             return ERR_BWRITE;
         }
         SetBit(blkdec, tmp_bn);
         free(tmp_ftn->string);
     }
-    return 1;
+    return 0;
 }
 
 /* the part that sets up the decodestate will be in client.c */
@@ -692,15 +693,35 @@ cleanup:
 /* Copied not quite verbatim from wikipedia.
    Used to check that network packets are intact
  */
-static uint16_t Fletcher16(uint8_t const * data, int count)
+static uint16_t Fletcher16(uint8_t const * data, size_t bytes)
 {
+#if 1
     uint16_t sum1 = 0;
     uint16_t sum2 = 0;
-    for (int i = 0; i < count; ++i) {
+    for (int i = 0; i < bytes; ++i) {
         sum1 = (sum1 + data[i]) % 255;
         sum2 = (sum2 + sum1) % 255;
     }
     return (sum2 << 8) | sum1;
+#else // The more efficient of the 2 implementations on wikipaedia
+    uint16_t sum1 = 0xff, sum2 = 0xff;
+    size_t tlen;
+
+    while (bytes) {
+        tlen = bytes >= 20 ? 20 : bytes;
+        bytes -= tlen;
+        do {
+            sum2 += sum1 += *data++;
+        } while (--tlen);
+        sum1 = (sum1 & 0xff) + (sum1 >> 8);
+        sum2 = (sum2 & 0xff) + (sum2 >> 8);
+    }
+    /* Second reduction step to reduce sums to 8
+     * bits */
+    sum1 = (sum1 & 0xff) + (sum1 >> 8);
+    sum2 = (sum2 & 0xff) + (sum2 >> 8);
+    return sum2 << 8 | sum1;
+#endif
 }
 
 static int fountain_packet_size(fountain_s* ftn) {
@@ -910,8 +931,7 @@ int packethold_add(packethold_s* hold, fountain_s* ftn) {
 
         char* mark_tmp_ptr = realloc(hold->mark, (space + 7) / 8);
         if (!mark_tmp_ptr) {
-            handle_error(REALLOC_ERR, NULL);
-            return REALLOC_ERR;
+            return handle_error(REALLOC_ERR, NULL);
         } else {
             hold->mark = mark_tmp_ptr;
             int old_len = (hold->num_slots + 7) / 8;
