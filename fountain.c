@@ -696,7 +696,7 @@ cleanup:
  */
 static uint16_t Fletcher16(uint8_t const * data, size_t bytes)
 {
-#if 1
+#if 0
     uint16_t sum1 = 0;
     uint16_t sum2 = 0;
     for (int i = 0; i < bytes; ++i) {
