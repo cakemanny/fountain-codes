@@ -89,7 +89,7 @@ test: tests
 $(call wino,fountain): main.o fountain.o errors.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-$(call wino,server): server.o fountain.o errors.o
+$(call wino,server): server.o fountain.o errors.o mapping.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 $(call wino,client): client.o fountain.o errors.o mapping.o

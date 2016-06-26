@@ -20,6 +20,7 @@
 #include "fountain.h"
 #include "dbg.h"
 #include "fountainprotocol.h" // msg definitions
+#include "mapping.h" // map_file unmap_file
 
 #define LISTEN_PORT 2534
 #define LISTEN_IP "0.0.0.0"
@@ -34,10 +35,10 @@ typedef struct client_s {
 
 // ------ Forward declarations ------
 static int create_connection(const char* ip_address);
-static int receive_request(client_s * new_client, const char * filename);
+static int receive_request(client_s * new_client, const char * filename, const char* mapping, size_t len);
 static void close_connection();
 static int send_fountain(client_s * client, fountain_s* ftn);
-static int send_block_burst(client_s * client, const char * filename, wait_signal_s* signal);
+static int send_block_burst(client_s * client, const char * mapping, size_t len, wait_signal_s* signal);
 static int send_info(client_s * client, const char * filename);
 static int filesize_in_bytes(const char * filename);
 
@@ -134,16 +135,16 @@ int main(int argc, char** argv) {
     if (f == NULL) handle_error(ERR_FOPEN, &filename);
     fclose(f);
 
+    int filesize = filesize_in_bytes(filename);
     if (blk_size <= 0) {
         blk_size = 128; // Should probably start at 1024
-        int filesize = filesize_in_bytes(filename);
         if (filesize < 0)
             return -1;
         while (filesize / blk_size > INT16_MAX) {
             blk_size <<= 1;
         }
         odebug("%d", blk_size);
-    } else if (filesize_in_bytes(filename) / blk_size > INT16_MAX) {
+    } else if (filesize / blk_size > INT16_MAX) {
         /*  The user provided a blk_size... better check they haven't done  *
          *  a silly                                                         */
         log_err("Block size is too small. Cannot divide file "
@@ -162,13 +163,20 @@ int main(int argc, char** argv) {
     }
     printf("Listening on %s:%d ...\n" ,listen_ip, listen_port);
 
-    client_s client;
+    // TODO: create a read-only version of this call
+    char* mapping = map_file(filename);
+    if (!mapping) {
+        log_err("Error mapping file: %s", filename);
+        return -1;
+    }
 
+    client_s client;
     int request_type;
-    while ((request_type = receive_request(&client, filename)) >= 0) {
+    while ((request_type = receive_request(&client, filename, mapping, filesize)) >= 0) {
         //
     }
 
+    unmap_file(mapping);
     close_connection();
     return 0;
 }
@@ -220,7 +228,7 @@ static void wait_signal_order_from_network(wait_signal_s* wait_signal) {
 //
 // Translate the message sent to us
 
-int receive_request(client_s * new_client, const char * filename) {
+int receive_request(client_s * new_client, const char * filename, const char* mapping, size_t len) {
     char buf[BUF_LEN];
     struct sockaddr_in remote_addr;
     socklen_t remote_addr_size = sizeof remote_addr;
@@ -257,7 +265,7 @@ int receive_request(client_s * new_client, const char * filename) {
             {
                 wait_signal_s* signal = (wait_signal_s*)buf;
                 wait_signal_order_from_network(signal);
-                error = send_block_burst(new_client, filename, signal);
+                error = send_block_burst(new_client, mapping, len, signal);
             }
             break;
         default:
@@ -333,16 +341,14 @@ int send_fountain(client_s * client, fountain_s* ftn) {
     return 0;
 }
 
-int send_block_burst(client_s * client, const char * filename, wait_signal_s* signal) {
-    FILE* f = fopen(filename, "rb");
-    if (!f) return ERR_FOPEN;
+int send_block_burst(client_s* client, const char* mapping, size_t len, wait_signal_s* signal) {
     for (int i = 0; i < signal->num_sections; i++) {
         int capacity = signal->sections[i].capacity;
         int section = signal->sections[i].section;
         for (int j = 0; j < capacity; j++) {
             // make a fountain
             // send it across the air
-            fountain_s* ftn = fmake_fountain(f, blk_size, section, section_size);
+            fountain_s* ftn = make_fountain(mapping, blk_size, len, section, section_size);
             if (ftn == NULL) return ERR_MEM;
             int error = send_fountain(client, ftn);
             if (error < 0) handle_error(error, NULL);
@@ -350,8 +356,6 @@ int send_block_burst(client_s * client, const char * filename, wait_signal_s* si
         }
         log_info("Sent packet burst of size %d for section %d", capacity, section);
     }
-
-    fclose(f);
     return 0;
 }
 

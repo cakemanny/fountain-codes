@@ -207,14 +207,19 @@ free_ftn:
     return NULL;
 }
 
-fountain_s* make_fountain(const char* string, int blk_size, size_t length, int section) {
+fountain_s* make_fountain(const char* string, int blk_size, size_t length, int section, int section_size) {
+    int bytes_per_section = blk_size * section_size;
+    int offset = section * bytes_per_section;
+
     fountain_s* output = malloc(sizeof *output);
     if (output == NULL) return NULL;
 
     memset(output, 0, sizeof *output);
-    int n = size_in_blocks(length, blk_size);
-    output->blk_size = blk_size;
 
+    output->blk_size = blk_size;
+    output->section = section;
+
+    int n = section_size;
     output->num_blocks = choose_num_blocks(n);
     assert( output->num_blocks > 0 );
     output->seed = rand();
@@ -230,7 +235,10 @@ fountain_s* make_fountain(const char* string, int blk_size, size_t length, int s
 
     for (int i = 0; i < output->num_blocks; i++) {
         int m = block_list[i] * blk_size;
-        xorncpy(output->string, string + m, blk_size);
+        if (offset + m < length)
+            xorncpy(output->string,
+                    string + offset + m,
+                    min(blk_size, length - offset - m));
     }
 
     // We need to allocate the blockset for our local test version
@@ -238,7 +246,6 @@ fountain_s* make_fountain(const char* string, int blk_size, size_t length, int s
         seeded_select_blockset(n, output->num_blocks, output->seed);
     if (!output->block_set) goto free_ftn;
     output->block_set_len = bset_len(n);
-    output->section = section;
 
     return output;
 
@@ -658,9 +665,10 @@ char* decode_fountain(const char* string, int blk_size) {
 
     state->filename = memdecodestate_filename;
 
+    int section_size = (length + blk_size - 1) / blk_size;
     fountain_s* ftn = NULL;
     do {
-        ftn = make_fountain(string, blk_size, length, 0);
+        ftn = make_fountain(string, blk_size, length, 0, section_size);
         if (!ftn) goto cleanup;
         state->packets_so_far += 1;
         result = _decode_fountain(state, ftn, &sblockread, &sblockwrite);
@@ -917,6 +925,7 @@ int packethold_add(packethold_s* hold, fountain_s* ftn) {
             memset(hold->deleted + old_len, 0, new_len - old_len);
         }
 
+        assert(ftn->block_set_len > 0);
         bset block_sets_tmp = bset_alloc_many(ftn->block_set_len * BSET_BITS,
                                               space);
         if (!block_sets_tmp) {

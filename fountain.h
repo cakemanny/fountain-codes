@@ -14,12 +14,9 @@ typedef struct fountain_s {
     int32_t num_blocks; // This doesn't really need to be so large
     int16_t blk_size;
     uint16_t section;
-    union { // we can union these because they are mutually exclusive and
-            // seed is never used again after block_set_len is overwritten
-        uint64_t seed;
-        uint64_t block_set_len;
-    };
+    uint64_t seed;
     char* string;   // TODO: rename this "data"
+    uint64_t block_set_len;
 #ifdef __x86_64__
     uint64_t* block_set;
 #else
@@ -79,7 +76,7 @@ extern char* memdecodestate_filename;
  * \param length The length of the block of memory
  * \returns pointer to a new fountain_s
  */
-fountain_s* make_fountain(const char* string, int blk_size, size_t length, int section) __malloc; /* allocs memory */
+fountain_s* make_fountain(const char* string, int blk_size, size_t length, int section, int section_size) __malloc; /* allocs memory */
 fountain_s* fmake_fountain(FILE* f, int blk_size, int section, int section_size) __malloc; /* allocs memory */
 void free_fountain(fountain_s* ftn);
 int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2);

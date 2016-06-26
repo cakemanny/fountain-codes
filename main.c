@@ -59,7 +59,8 @@ static fountain_s* from_file() {
 }
 
 static fountain_s* from_mem() {
-    return make_fountain(meminput, blk_size, strlen(meminput), 0);
+    int section_size = (strlen(meminput) + blk_size - 1) / blk_size;
+    return make_fountain(meminput, blk_size, strlen(meminput), 0, section_size);
 }
 
 static int proc_file(fountain_src ftn_src) {
