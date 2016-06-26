@@ -135,6 +135,11 @@ error:
     return NULL;
 }
 
+// For our sorting of the block_list before reading the file in fmake_fountain
+static int intcmp(const void* a, const void* b) {
+    return (*(int*)a) - (*(int*)b);
+}
+
 /* makes a fountain fountain, given a file */
 fountain_s* fmake_fountain(FILE* f, int blk_size, int section, int section_size) {
     static char fmake_buf[4096];
@@ -156,6 +161,10 @@ fountain_s* fmake_fountain(FILE* f, int blk_size, int section, int section_size)
     output->seed = rand();
     int block_list[output->num_blocks];
     seeded_select_blocks(block_list, n, output->num_blocks, output->seed);
+
+    // sort the block_list to make the freads below sequential
+    // this gives about 1.5x speed up in our tests on large files
+    qsort(block_list, output->num_blocks, sizeof *block_list, intcmp);
 
     // XOR blocks together
     // Why blk_size + 1? we are no longer terminate with NULL
@@ -212,6 +221,8 @@ fountain_s* make_fountain(const char* string, int blk_size, size_t length, int s
 
     int block_list[output->num_blocks];
     seeded_select_blocks(block_list, n, output->num_blocks, output->seed);
+    // sort to make block reading sequential
+    qsort(block_list, output->num_blocks, sizeof *block_list, intcmp);
 
     // XOR blocks together
     output->string = calloc(blk_size, sizeof *output->string);
