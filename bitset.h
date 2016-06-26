@@ -49,7 +49,8 @@ typedef uint32_t* bset32;
 #   define ClearBit(x, i)   ClearBit32(x, i)
 #endif
 
-static size_t bset_len(int num_bits) {
+static size_t bset_len(int num_bits) __attribute__((const));
+size_t bset_len(int num_bits) {
     return (num_bits + (BSET_BITS-1)) / BSET_BITS;
 }
 

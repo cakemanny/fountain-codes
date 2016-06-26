@@ -50,7 +50,11 @@ typedef struct packethold_s {
 typedef struct decodestate_s {
     int blk_size;
     int num_blocks;
-    char* blkdecoded;   // TODO: probably ought to change to bitset
+#ifdef __x86_64__
+    uint64_t* blkdecoded;   // TODO: probably ought to change to bitset
+#else
+    uint32_t* blkdecoded;
+#endif
     packethold_s* hold;
     int packets_so_far;
     char* filename; /* must be in wb+ mode */

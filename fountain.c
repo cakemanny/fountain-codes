@@ -470,7 +470,7 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
     assert(ftn->num_blocks > 0);
 
     bool retest = false;
-    char* blkdec = state->blkdecoded;
+    bset blkdec = state->blkdecoded;
     packethold_s* hold = state->hold;
     int blk_size = state->blk_size;
 
@@ -483,11 +483,11 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
         // Case one, block size one
         if (ftn->num_blocks == 1) {
             const int blk_num = blockset_single_block_num(ftn->block_set);
-            assert( blk_num >= 0 );
-            if (blkdec[blk_num] == 0) {
+            assert( blk_num >= 0 && blk_num < state->num_blocks );
+            if (!IsBitSet(blkdec, blk_num)) {
                 if (bwrite(ftn->string, blk_num, state) != 1)
                     return ERR_BWRITE;
-                blkdec[blk_num] = 1;
+                SetBit(blkdec, blk_num);
             } else { /* block already decoded */
                 return F_ALREADY_DECODED;
             }
@@ -515,7 +515,8 @@ static int _decode_fountain(decodestate_s* state, fountain_s* ftn,
                 j = blockset_lowest_set_above(
                         ftn->block_set, ftn->block_set_len, j);
                 if (j == -1) break;
-                if (blkdec[j]) {
+                assert( j >= 0 && j < state->num_blocks);
+                if (IsBitSet(blkdec, j)) {
                     // Xor the decoded block out of a new packet
                     char buf[blk_size];
                     memset(buf, 0, blk_size);
@@ -585,7 +586,7 @@ int write_hold_ftn_to_output(
         blockwrite_f bwrite)
 {
     int i = hold_offset;
-    char* blkdec = state->blkdecoded;
+    bset blkdec = state->blkdecoded;
 
     assert(!ISBITSET(hold->deleted, i));
 
@@ -594,13 +595,14 @@ int write_hold_ftn_to_output(
     tmp_ftn = packethold_remove(hold, i, &ltmp_ftn);
     if (!tmp_ftn) return ERR_MEM;
     int tmp_bn = blockset_single_block_num(tmp_ftn->block_set);
-    if (blkdec[tmp_bn] == 0) { /* not yet decoded so
+    assert( tmp_bn >= 0 && tmp_bn < state->num_blocks );
+    if (!IsBitSet(blkdec, tmp_bn)) { /* not yet decoded so
                                             write to file */
         if (bwrite(tmp_ftn->string, tmp_bn, state) != 1) {
             free(tmp_ftn->string);
             return ERR_BWRITE;
         }
-        blkdec[tmp_bn] = 1;
+        SetBit(blkdec, tmp_bn);
         free(tmp_ftn->string);
     }
     return 1;
@@ -796,7 +798,6 @@ packethold_s* packethold_new(int num_blocks) {
     hold->deleted = calloc((BUFFER_SIZE + 7) / 8, sizeof *hold->deleted);
     if (!hold->deleted) goto free_mark;
 
-    // TODO: continue with this stuff
     hold->block_sets = bset_alloc_many(num_blocks, BUFFER_SIZE);
     if (!hold->block_sets) goto free_deleted;
 
@@ -877,6 +878,10 @@ void packethold_collect_garbage(packethold_s* hold)
     for (; i < hold->num_packets; i++) {
         if (!ISBITSET(deleted, i)) {
             ftns[mp] = ftns[i];
+            bset old_bset = ftns[mp].block_set;
+            ftns[mp].block_set = hold->block_sets + (mp * ftns[mp].block_set_len);
+            memcpy(ftns[mp].block_set, old_bset,
+                   ftns[mp].block_set_len * sizeof *old_bset);
             if (ISBITSET(mark, i)) {
                 SETBIT(mark, mp);
             } else {
@@ -1012,7 +1017,7 @@ decodestate_s* decodestate_new(int blk_size, int num_blocks) {
     output->hold = packethold_new(num_blocks);
     if (!output->hold) goto cleanup;
 
-    output->blkdecoded = calloc(num_blocks, sizeof *output->blkdecoded);
+    output->blkdecoded = bset_alloc(num_blocks);
     if (!output->blkdecoded) goto free_hold;
 
     return output;
@@ -1026,21 +1031,22 @@ cleanup:
 
 void decodestate_free(decodestate_s* state) {
     if (state->blkdecoded)
-        free(state->blkdecoded);
+        bset_free(state->blkdecoded);
     if (state->hold)
         packethold_free(state->hold);
-//    if (state->filename)
-//        free(state->filename);
-//    if (state->fp)
-//        fclose(state->fp);
     free(state);
 }
 
 int decodestate_is_decoded(decodestate_s* state) {
-    register char* dc = state->blkdecoded;
-    register int num_solved = 0;
-    for (int i = 0; i < state->num_blocks; i++) {
-        num_solved += *dc++;
+    int blkdec_len = bset_len(state->num_blocks);
+    int num_solved = 0;
+    for (int i = 0; i < blkdec_len; i++) {
+#ifdef __x86_64__
+        num_solved += __builtin_popcountll(state->blkdecoded[i]);
+#else
+        num_solved += __builtin_popcount(state->blkdecoded[i]);
+#endif
+
     }
     return (num_solved == state->num_blocks);
 }
