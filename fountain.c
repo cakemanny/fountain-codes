@@ -41,7 +41,7 @@ static char * xorncpy (char* destination, const char* source, register size_t n)
     return (destination);
 }
 
-#ifndef HAVE_CTZ
+#ifndef HAVE_CTZ // TODO: Change this to use deBruuijn sequence!
 /* We only use these if we don't has ffs */
 static const char LogTable256[256] =
 {

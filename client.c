@@ -436,7 +436,6 @@ ftn_cache_s* ftn_cache_alloc(unsigned int num_caches) {
     // zero only the cache structs
     memset(caches, 0, num_caches * sizeof *caches);
 
-    // 
     caches[0].base = (fountain_s**) &caches[num_caches];
     for (int i = 1; i < num_caches; i++) {
         caches[i].base = caches[0].base + i * capacity_each;
@@ -505,6 +504,7 @@ static void load_from_network(ftn_cache_s* cache, int num_sections) {
 
     static const int max_timeout = 15000;
     int timeout = 10;
+    int null_ftn_cnt = 0;
 
     int total_capacities = ({
         int sum = 0;
@@ -528,6 +528,7 @@ static void load_from_network(ftn_cache_s* cache, int num_sections) {
                 // FIXME: check return code
                 send_wait_signal(num_sections, c.sections, c.caps);
                 timeout <<= 1;
+                --i; // don't want to i++, so --i before continue
                 continue;
             }
         } else if (pollret < 0) {
@@ -543,6 +544,7 @@ static void load_from_network(ftn_cache_s* cache, int num_sections) {
 
         int bytes_recvd = recv_msg(netbuf, netbuf_len);
         if (bytes_recvd < 0) {
+            log_err("bytes_recvd < 0");// TODO: probs want proer error code
             handle_error(bytes_recvd, NULL);
             return;
         }
@@ -559,6 +561,7 @@ static void load_from_network(ftn_cache_s* cache, int num_sections) {
             // i, but that may end the program if we get too many bad packets.
             // Both are unlikely. May have to consider using some sort of
             // error code instead
+            null_ftn_cnt += 1;
             continue;
         }
         // find cache for this section
@@ -577,14 +580,19 @@ static void load_from_network(ftn_cache_s* cache, int num_sections) {
             // Must be an old packet from a previous request
             debug("discarding fountain from section %d", ftn->section);
             free_fountain(ftn);
-            continue;
+            --i; // Since packet from previous request we don't count it
         }
     }
     ftn_cache_s* c = cache;
     for (int i = 0; i < num_sections; i++) {
         c->current = c->base;
-        debug("Cache size is now %d", c->size);
+        debug("Cache %d size is now %d", i, c->size);
         c = c->next;
+    }
+    if (cache->size == 0) {
+        debug("Returning with 0 sized cache");
+        log_info("null_ftn_cnt = %d", null_ftn_cnt);
+        __builtin_trap();
     }
 }
 
@@ -673,7 +681,10 @@ int proc_file(file_info_s* file_info) {
     for (int section_num = 0; section_num < num_sections; section_num++) {
         decodestate_s* state =
             decodestate_new(file_info->blk_size, file_info->section_size);
-        if (!state) return handle_error(ERR_MEM, NULL);
+        if (!state) {
+            __builtin_trap();
+            return handle_error(ERR_MEM, NULL);
+        }
 
         // Have to declare this above the first goto cleanup
         fountain_s* ftn = NULL;
@@ -683,6 +694,7 @@ int proc_file(file_info_s* file_info) {
             state = (decodestate_s*)tmp_ptr;
         } else {
             result = ERR_MEM;
+            __builtin_trap();
             goto cleanup;
         }
 
