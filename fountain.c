@@ -604,8 +604,9 @@ int write_hold_ftn_to_output(
             return ERR_BWRITE;
         }
         SetBit(blkdec, tmp_bn);
-        free(tmp_ftn->string);
     }
+
+    free(tmp_ftn->string);
     return 0;
 }
 

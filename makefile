@@ -36,7 +36,7 @@ ifdef RELEASE
   endif # Platform
 
 else # Not RELEASE
-  CFLAGS=-g -Wall -c -O0 -fms-extension
+  CFLAGS=-g -Wall -c -O0 -fms-extensions
   LDFLAGS=
 endif # End RELEASE-IF
 
@@ -46,8 +46,8 @@ ifdef PROFILE
 endif
 
 ifdef SANIT
-  CC=clang -std=gnu11
-  CFLAGS+=-fsanitize=$(SANIT) -g -Wno-microsoft -fno-omit-frame-pointer -O0
+  CC=clang -std=gnu11 -Wno-microsoft
+  CFLAGS+=-fsanitize=$(SANIT) -fno-omit-frame-pointer -O1
   LDFLAGS+=-fsanitize=$(SANIT)
 endif
 
