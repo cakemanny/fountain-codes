@@ -54,7 +54,12 @@ static size_t bset_len(int num_bits) {
 }
 
 static bset bset_alloc(int num_bits) __malloc;
+static bset bset_alloc_many(int num_bits, int count) __malloc;
 bset bset_alloc(int num_bits)
+{
+    return bset_alloc_many(num_bits, 1);
+}
+bset bset_alloc_many(int num_bits, int count)
 {
     int len = bset_len(num_bits); // number of ints / int64s
     /*
@@ -66,13 +71,13 @@ bset bset_alloc(int num_bits)
         int alignment = width_in_bytes > 32 ? 32 : width_in_bytes;
 
 #ifdef _WIN32
-        bset mem = _aligned_malloc(len * sizeof(bset_int), alignment);
+        bset mem = _aligned_malloc(count * len * sizeof(bset_int), alignment);
 #else
         bset mem = NULL;
-        posix_memalign((void**)&mem, alignment, len * sizeof(bset_int));
+        posix_memalign((void**)&mem, alignment, count * len * sizeof(bset_int));
 #endif
         if (mem)
-            memset(mem, 0, len * sizeof(bset_int));
+            memset(mem, 0, count * len * sizeof(bset_int));
         return mem;
     } else {
         return calloc(len, sizeof(bset_int));

@@ -260,29 +260,6 @@ int cmp_fountain(fountain_s* ftn1, fountain_s* ftn2) {
     return 0;
 }
 
-int fountain_copy(fountain_s* dst, fountain_s* src) {
-    int blk_size = (dst->blk_size = src->blk_size);
-    dst->num_blocks = src->num_blocks;
-    dst->section = src->section;
-    dst->seed = src->seed;
-    dst->block_set_len = src->block_set_len;
-
-    dst->string = malloc(blk_size * sizeof *dst->string);
-    if (!dst->string) goto cleanup;
-
-    memcpy(dst->string, src->string, blk_size);
-
-    dst->block_set = malloc(src->block_set_len * sizeof *dst->block_set);
-    if (!dst->block_set) goto free_str;
-    memcpy(dst->block_set, src->block_set, src->block_set_len * sizeof *dst->block_set);
-
-    return 0;
-free_str:
-    free(dst->string);
-cleanup:
-    return ERR_MEM;
-}
-
 void print_fountain(const fountain_s * ftn) {
     printf("{ num_blocks: %"PRId32", blk_size: %"PRId16", section: %"PRIu16", seed: %"PRIu64", blocks: ",
             ftn->num_blocks, ftn->blk_size, ftn->section, ftn->seed);
@@ -603,12 +580,10 @@ int write_hold_ftn_to_output(
                                             write to file */
         if (bwrite(tmp_ftn->string, tmp_bn, state) != 1) {
             free(tmp_ftn->string);
-            bset_free(tmp_ftn->block_set);
             return ERR_BWRITE;
         }
         blkdec[tmp_bn] = 1;
         free(tmp_ftn->string);
-        bset_free(tmp_ftn->block_set);
     }
     return 1;
 }
@@ -786,7 +761,7 @@ free_fountain:
 
 /* ============ Packhold Functions ========================================= */
 
-packethold_s* packethold_new() {
+packethold_s* packethold_new(int num_blocks) {
     packethold_s* hold = malloc(sizeof *hold);
     if (!hold) return NULL;
     memset(hold, 0, sizeof *hold);
@@ -802,7 +777,13 @@ packethold_s* packethold_new() {
     hold->deleted = calloc((BUFFER_SIZE + 7) / 8, sizeof *hold->deleted);
     if (!hold->deleted) goto free_mark;
 
+    // TODO: continue with this stuff
+    hold->block_sets = bset_alloc_many(num_blocks, BUFFER_SIZE);
+    if (!hold->block_sets) goto free_deleted;
+
     return hold;
+free_deleted:
+    free(hold->deleted);
 free_mark:
     free(hold->mark);
 free_fountain:
@@ -815,13 +796,13 @@ free_hold:
 void packethold_free(packethold_s* hold) {
     for (int i = 0; i < hold->num_packets; i++) {
         if (!ISBITSET(hold->deleted, i)) {
-            if (hold->fountain[i].string) free(hold->fountain[i].string);
-            if (hold->fountain[i].block_set) bset_free(hold->fountain[i].block_set);
+            free(hold->fountain[i].string);
         }
     }
     if (hold->mark) free(hold->mark);
     if (hold->deleted) free(hold->deleted);
     if (hold->fountain) free(hold->fountain);
+    if (hold->block_sets) bset_free(hold->block_sets);
     free(hold);
 }
 
@@ -925,16 +906,42 @@ int packethold_add(packethold_s* hold, fountain_s* ftn) {
             memset(hold->deleted + old_len, 0, new_len - old_len);
         }
 
+        bset block_sets_tmp = bset_alloc_many(ftn->block_set_len * BSET_BITS,
+                                              space);
+        if (!block_sets_tmp) {
+            return handle_error(REALLOC_ERR, NULL);
+        } else {
+            memcpy(block_sets_tmp,
+                   hold->block_sets,
+                   ftn->block_set_len * hold->num_slots * sizeof *block_sets_tmp);
+            bset_free(hold->block_sets);
+            hold->block_sets = block_sets_tmp;
+            // Need to alter the fountains to point into the new allocation
+            int bslen = ftn->block_set_len;
+            for (int i = 0, j = 0, n = hold->offset; i < n; i++, j += bslen) {
+                hold->fountain[i].block_set = hold->block_sets + j;
+            }
+        }
+
         hold->num_slots = space;
     }
 
-    //if (fountain_copy(&hold->fountain[hold->offset++], ftn) < 0)
-    //    return ERR_MEM;
+    // Copy the ftn->block_set to our hold->block_sets
+    bset dst_bset = hold->block_sets + (hold->offset * ftn->block_set_len);
+    memcpy(dst_bset,
+           ftn->block_set,
+           ftn->block_set_len * sizeof *ftn->block_set);
+
     // Shallow copy and null out the pointers since this is always the last
     // thing to happen before returning the packet
-    hold->fountain[hold->offset++] = *ftn;
+    fountain_s* dst = &hold->fountain[hold->offset++];
+    *dst = *ftn;
     ftn->string = NULL;
-    ftn->block_set = NULL;
+    // Don't need to null this out or dealloc as the caller of _decode... will
+    // do this
+    //bset_free(ftn->block_set);
+    // Make the stored fountain point into our block_set array
+    dst->block_set = dst_bset;
 
     CLEARBIT(hold->mark, hold->num_packets);
     hold->num_packets++;
@@ -982,7 +989,7 @@ decodestate_s* decodestate_new(int blk_size, int num_blocks) {
         .blk_size = blk_size
     };
 
-    output->hold = packethold_new();
+    output->hold = packethold_new(num_blocks);
     if (!output->hold) goto cleanup;
 
     output->blkdecoded = calloc(num_blocks, sizeof *output->blkdecoded);

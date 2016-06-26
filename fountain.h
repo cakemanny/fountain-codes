@@ -14,9 +14,12 @@ typedef struct fountain_s {
     int32_t num_blocks; // This doesn't really need to be so large
     int16_t blk_size;
     uint16_t section;
-    uint64_t seed;
+    union { // we can union these because they are mutually exclusive and
+            // seed is never used again after block_set_len is overwritten
+        uint64_t seed;
+        uint64_t block_set_len;
+    };
     char* string;   // TODO: rename this "data"
-    size_t block_set_len;
 #ifdef __x86_64__
     uint64_t* block_set;
 #else
@@ -39,6 +42,11 @@ typedef struct packethold_s {
     size_t offset;
     char* mark; /* bitset for mark algorithm */
     char* deleted; /* bitset for marking packets as deleted */
+#ifdef __x86_64__
+    uint64_t* block_sets;
+#else
+    uint32_t* block_sets; // Use bitset on receiving end
+#endif
 } packethold_s;
 
 /** This is the structure we keep the state of our decoding in. */
@@ -93,12 +101,6 @@ int fdecode_fountain(decodestate_s* state, fountain_s* ftn);
 /* same as fdecode_fountain but more memdecodestate_s's */
 int memdecode_fountain(memdecodestate_s* state, fountain_s* ftn);
 
-/* returns 0 on success
-   returns ERR_MEM if mem allocation occurs for creating the pointed to
-           elements.
- */
-int fountain_copy(fountain_s* dst, fountain_s* src); /* allocs memory */
-
 typedef struct buffer_s {
     int length;
     char* buffer;
@@ -120,7 +122,8 @@ buffer_s pack_fountain(fountain_s* ftn);
 fountain_s* unpack_fountain(buffer_s packet, int section_size_in_blocks) __malloc;
 
 /* ============ packethold_s functions  ==================================== */
-packethold_s* packethold_new() __malloc; /* allocs memory */
+// num_blocks in the number in the result - not the length of the hold
+packethold_s* packethold_new(int num_blocks) __malloc; /* allocs memory */
 void packethold_free(packethold_s* hold);
 fountain_s* packethold_remove(packethold_s* hold, int pos, fountain_s* output); /* allocs memory*/
 

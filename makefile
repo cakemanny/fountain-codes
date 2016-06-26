@@ -17,7 +17,7 @@ endif
 
 # We will rarely want a release build so only when release is defined
 ifdef RELEASE
-  CFLAGS=-DNDEBUG -Wall -g -c -O3 -fms-extensions -march=native
+  CFLAGS=-DNDEBUG -Wall -g -c -O3 -fms-extensions -march=native -fno-omit-frame-pointer
   LDFLAGS=
 
   ifeq "$(PLATFORM)" "Darwin"
@@ -46,7 +46,8 @@ ifdef PROFILE
 endif
 
 ifdef SANIT
-  CFLAGS+=-fsanitize=address
+  CC=gcc -std=gnu11
+  CFLAGS+=-fsanitize=address -Wno-microsoft -fno-omit-frame-pointer -O1
   LDFLAGS+=-fsanitize=address
 endif
 
