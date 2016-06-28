@@ -8,6 +8,11 @@
 char* map_file(char const * filename);
 
 /**
+ * Same as map_file but maps the page as read-only
+ */
+char* map_file_read(char const * filename);
+
+/**
  * To be called once the mapping is finished with.
  * Unmaps the mapping, closes the mapping object (WIN32), and closes the file
  * handle/descriptor

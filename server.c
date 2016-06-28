@@ -163,8 +163,7 @@ int main(int argc, char** argv) {
     }
     printf("Listening on %s:%d ...\n" ,listen_ip, listen_port);
 
-    // TODO: create a read-only version of this call
-    char* mapping = map_file(filename);
+    char* mapping = map_file_read(filename);
     if (!mapping) {
         log_err("Error mapping file: %s", filename);
         return -1;

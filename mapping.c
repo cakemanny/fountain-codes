@@ -36,7 +36,18 @@ struct mapping_data {
 static thread_local int num_mappings = 0;
 static thread_local struct mapping_data mappings[32] = { };
 
-char* map_file(char const * filename) {
+static char* _map_file(const char * filename, int allow_write);
+
+char* map_file(char const * filename)
+{
+    return _map_file(filename, 1);
+}
+char * map_file_read(char const * filename)
+{
+    return _map_file(filename, 0);
+}
+
+char* _map_file(char const * filename, int allow_write) {
     if (num_mappings >= 32)
         return NULL;
 #ifdef _WIN32
@@ -48,12 +59,12 @@ char* map_file(char const * filename) {
 
 	HANDLE file = CreateFileW(
 		wfilename,		/* filename */
-		GENERIC_READ | GENERIC_WRITE, /* desired access */
+        GENERIC_READ | (-allow_write & GENERIC_WRITE), /* desired access */
 		0,				/* Dont' share */
 		NULL,			/* don't care about security */
 		OPEN_EXISTING,		/* only work with existing files */
 		FILE_ATTRIBUTE_NORMAL, /* Just normal thanks */
-		NULL);			/* tempplate file - nope */
+		NULL);			/* template file - nope */
 
 	if (file == INVALID_HANDLE_VALUE)
 		return NULL;
@@ -65,13 +76,15 @@ char* map_file(char const * filename) {
 		return NULL;
 	}
 
-	HANDLE mapping_object = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, 0, NULL);
+    DWORD prot = allow_write ? PAGE_READWRITE : PAGE_READONLY;
+	HANDLE mapping_object = CreateFileMappingA(file, NULL, prot, 0, 0, NULL);
 	if (mapping_object == NULL) {
 		CloseHandle(file);
 		return NULL;
 	}
 
-	char* mapped = (char*)MapViewOfFile(mapping_object, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+    DWORD access = allow_write ? FILE_MAP_ALL_ACCESS : FILE_MAP_READ;
+	char* mapped = (char*)MapViewOfFile(mapping_object, access, 0, 0, 0);
 	if (mapped == NULL) {
 		CloseHandle(mapping_object);
 		CloseHandle(file);
@@ -89,7 +102,7 @@ char* map_file(char const * filename) {
 
 	return mapped;
 #else
-    int fd = open(filename, O_RDWR);
+    int fd = open(filename, allow_write ? O_RDWR : O_RDONLY);
     if (fd < 0)
         return NULL;
 
@@ -97,7 +110,8 @@ char* map_file(char const * filename) {
     stat(filename, &st);
     size_t filesize = st.st_size;
 
-    char* mapped = (char*)mmap(NULL, filesize, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+    int prot = PROT_READ | (-allow_write & PROT_WRITE);
+    char* mapped = (char*)mmap(NULL, filesize, prot, MAP_SHARED, fd, 0);
     if (mapped == MAP_FAILED) {
         close(fd);
         return NULL;
