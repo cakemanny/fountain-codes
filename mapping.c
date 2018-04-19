@@ -57,50 +57,50 @@ char* _map_file(char const * filename, int allow_write) {
     WCHAR wfilename[wlen];
     MultiByteToWideChar(CP_UTF8, 0, filename, -1, wfilename, wlen);
 
-	HANDLE file = CreateFileW(
-		wfilename,		/* filename */
+    HANDLE file = CreateFileW(
+        wfilename,      /* filename */
         GENERIC_READ | (-allow_write & GENERIC_WRITE), /* desired access */
-		0,				/* Dont' share */
-		NULL,			/* don't care about security */
-		OPEN_EXISTING,		/* only work with existing files */
-		FILE_ATTRIBUTE_NORMAL, /* Just normal thanks */
-		NULL);			/* template file - nope */
+        0,              /* Dont' share */
+        NULL,           /* don't care about security */
+        OPEN_EXISTING,  /* only work with existing files */
+        FILE_ATTRIBUTE_NORMAL, /* Just normal thanks */
+        NULL);          /* template file - nope */
 
-	if (file == INVALID_HANDLE_VALUE)
-		return NULL;
+    if (file == INVALID_HANDLE_VALUE)
+        return NULL;
 
-	DWORD filesize = GetFileSize(file, NULL);
-	// Cannot map zero-length files
-	if (filesize == INVALID_FILE_SIZE || filesize == 0) {
-		CloseHandle(file);
-		return NULL;
-	}
+    DWORD filesize = GetFileSize(file, NULL);
+    // Cannot map zero-length files
+    if (filesize == INVALID_FILE_SIZE || filesize == 0) {
+        CloseHandle(file);
+        return NULL;
+    }
 
     DWORD prot = allow_write ? PAGE_READWRITE : PAGE_READONLY;
-	HANDLE mapping_object = CreateFileMappingA(file, NULL, prot, 0, 0, NULL);
-	if (mapping_object == NULL) {
-		CloseHandle(file);
-		return NULL;
-	}
+    HANDLE mapping_object = CreateFileMappingA(file, NULL, prot, 0, 0, NULL);
+    if (mapping_object == NULL) {
+        CloseHandle(file);
+        return NULL;
+    }
 
     DWORD access = allow_write ? FILE_MAP_ALL_ACCESS : FILE_MAP_READ;
-	char* mapped = (char*)MapViewOfFile(mapping_object, access, 0, 0, 0);
-	if (mapped == NULL) {
-		CloseHandle(mapping_object);
-		CloseHandle(file);
-		return NULL;
-	}
+    char* mapped = (char*)MapViewOfFile(mapping_object, access, 0, 0, 0);
+    if (mapped == NULL) {
+        CloseHandle(mapping_object);
+        CloseHandle(file);
+        return NULL;
+    }
 
-	struct mapping_data new_mapping = {
-		.mapped_address = mapped,
-		.filename = filename,
-		.size = filesize,
-		.file_handle = file,
+    struct mapping_data new_mapping = {
+        .mapped_address = mapped,
+        .filename = filename,
+        .size = filesize,
+        .file_handle = file,
         .mapping_object = mapping_object
-	};
-	mappings[num_mappings++] = new_mapping;
+    };
+    mappings[num_mappings++] = new_mapping;
 
-	return mapped;
+    return mapped;
 #else
     int fd = open(filename, allow_write ? O_RDWR : O_RDONLY);
     if (fd < 0)
