@@ -12,5 +12,6 @@ tags
 client
 fountain
 server
+fountain_test
 # those dSYM directories that valgrind likes
 *.dSYM/
