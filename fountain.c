@@ -61,7 +61,7 @@ static unsigned int log2i_32(unsigned int v) { // 32-bit word to find the log of
     }
 }
 
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__arm64__)
 static uint64_t log2i_64(uint64_t v) {
     register uint64_t t;
     return ((t = v >> 32)) ? 32 + log2i_32(t) : log2i_32(v);
@@ -1062,7 +1062,7 @@ int decodestate_is_decoded(decodestate_s* state) {
     int blkdec_len = bset_len(state->num_blocks);
     int num_solved = 0;
     for (int i = 0; i < blkdec_len; i++) {
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__arm64__)
         num_solved += __builtin_popcountll(state->blkdecoded[i]);
 #else
         num_solved += __builtin_popcount(state->blkdecoded[i]);

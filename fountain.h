@@ -17,7 +17,7 @@ typedef struct fountain_s {
     uint64_t seed;
     char* string;   // TODO: rename this "data"
     uint64_t block_set_len;
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__arm64__)
     uint64_t* block_set;
 #else
     uint32_t* block_set; // Use bitset on receiving end
@@ -39,7 +39,7 @@ typedef struct packethold_s {
     size_t offset;
     char* mark; /* bitset for mark algorithm */
     char* deleted; /* bitset for marking packets as deleted */
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__arm64__)
     uint64_t* block_sets;
 #else
     uint32_t* block_sets; // Use bitset on receiving end
@@ -50,7 +50,7 @@ typedef struct packethold_s {
 typedef struct decodestate_s {
     int blk_size;
     int num_blocks;
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__arm64__)
     uint64_t* blkdecoded;   // TODO: probably ought to change to bitset
 #else
     uint32_t* blkdecoded;

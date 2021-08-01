@@ -21,7 +21,7 @@
 typedef uint64_t* bset64;
 typedef uint32_t* bset32;
 
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__arm64__)
 #   define BSET_BITS        64
 #   define BSET_BITS_W      6
 #   define PRIbset          PRIx64
